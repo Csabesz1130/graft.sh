@@ -118,6 +118,19 @@ This is version 0.1.
 - A certificate's digest shows whether the file was edited after graft wrote it. It is not a signature.
 - A reply recorded from production with no rule written for it is checked by similarity only, and the certificate counts such cases as weak.
 
+## Run the Linux acceptance tests
+
+From the repository root, use the same entry points as GitHub Actions. The server needs Python 3.11 or later with `venv`, Git, curl and a free loopback port. The runner installs into a temporary environment and exercises the installed CLI.
+
+```sh
+scripts/server-test.sh
+GRAFT_TEST_PYTHON=python3.12 GRAFT_TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu scripts/server-test.sh --train
+```
+
+The first command covers the core suite, a full demo rebase and its alternate endings. The second installs the training dependencies and requires all trainer tests to run. The optional Torch index selects CPU wheels on the Hetzner VM. A plain `scripts/server-test.sh --train` uses the configured default package index. Both commands return a nonzero status on a failed check.
+
+The reported Hetzner run passed all 68 tests in training mode with CUDA unavailable. Its demo certificate recorded 52/52 passing cases and five rules holding. The baseline run skipped the four trainer tests as expected. These counts identify that run and can grow as cases are added.
+
 ## Documentation
 
 - **[User guide](docs/user-guide.md):** build a genome, set up models, run a rebase, train, read the certificate.

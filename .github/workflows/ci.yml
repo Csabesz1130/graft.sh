@@ -1,9 +1,9 @@
 name: ci
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, claude/blissful-dirac-g1g5u6]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, claude/blissful-dirac-g1g5u6]
   workflow_dispatch:
 
 concurrency:
@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   test:
+    name: Baseline acceptance (Python ${{ matrix.python }})
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -26,25 +27,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      # The core has no dependencies. The trainer tests skip themselves without torch.
-      - run: python -m unittest discover -s tests -t .
+      - name: Run the installed CLI, unit and demo tests
+        env:
+          GRAFT_TEST_PYTHON: python
+        run: scripts/server-test.sh
 
-  example:
+  train-cpu:
+    name: CPU trainer and full rebase
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
-      - run: pip install .
-      - name: The README's demo, as written
-        working-directory: examples/support-desk
-        run: |
-          python3 mock_models.py &
-          for _ in $(seq 50); do curl -fsS http://127.0.0.1:8811/v1/models >/dev/null && break; sleep 0.2; done
-          graft rebase --target new-base
-          graft show
+          python-version: "3.12"
+      - name: Run all trainer tests on CPU
+        env:
+          CUDA_VISIBLE_DEVICES: ""
+          GRAFT_TEST_PYTHON: python
+          GRAFT_TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+          OMP_NUM_THREADS: "2"
+          MKL_NUM_THREADS: "2"
+        run: scripts/server-test.sh --train
 
   lint:
     runs-on: ubuntu-24.04
@@ -52,5 +56,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uvx ruff@0.17.0 check graft tests examples
-      - run: shellcheck -S warning install.sh
+      - run: uvx ruff@0.17.0 check graft tests examples scripts
+      - run: shellcheck -S warning install.sh scripts/server-test.sh
