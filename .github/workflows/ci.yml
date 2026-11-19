@@ -1,0 +1,56 @@
+name: ci
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # The core has no dependencies. The trainer tests skip themselves without torch.
+      - run: python -m unittest discover -s tests -t .
+
+  example:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install .
+      - name: The README's demo, as written
+        working-directory: examples/support-desk
+        run: |
+          python3 mock_models.py &
+          for _ in $(seq 50); do curl -fsS http://127.0.0.1:8811/v1/models >/dev/null && break; sleep 0.2; done
+          graft rebase --target new-base
+          graft show
+
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uvx ruff@0.17.0 check graft tests examples
+      - run: shellcheck -S warning install.sh

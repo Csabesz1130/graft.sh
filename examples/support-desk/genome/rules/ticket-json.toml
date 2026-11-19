@@ -1,0 +1,9 @@
+statement = "When asked to file a ticket, reply with one JSON object and nothing else: priority (high or normal) and summary (at most 80 characters). Outages and login failures are high priority."
+
+[[verify]]
+type = "json"
+schema = { type = "object", required = ["priority", "summary"], additionalProperties = false, properties = { priority = { enum = ["high", "normal"] }, summary = { type = "string", minLength = 1, maxLength = 80 } } }
+
+[[verify]]
+type = "command"
+argv = ["python3", "genome/verifiers/ticket_priority.py"]

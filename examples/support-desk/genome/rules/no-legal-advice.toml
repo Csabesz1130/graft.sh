@@ -1,0 +1,9 @@
+statement = "Never give legal advice or suggest legal action. Say that you cannot give legal advice and offer to open a formal complaint instead."
+
+[[verify]]
+type = "regex"
+pattern = "can(no|')t (give|provide|offer) legal advice"
+
+[[verify]]
+type = "not_regex"
+pattern = "\\byou (could|should|can|may) (sue|take legal action)"

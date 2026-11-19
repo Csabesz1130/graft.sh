@@ -1,0 +1,141 @@
+# graft command reference
+
+Every `graft` command and its options. For a walkthrough, see the [user guide](user-guide.md).
+
+```text
+graft <command> [options]
+graft <command> --help
+```
+
+## Conventions
+
+- graft works in the folder that holds `graft.toml`, or any folder below it.
+- Models are named as in `graft.toml`: `[models.prod]` is `prod`.
+- A rebase is named `<target>/<run>`, for example `new-base/0002-4f2a9c1e`. The run id is a counter and the first 8 characters of the genome id. Where a command takes a run, the target alone means that target's latest run, and nothing means the latest run of all.
+- Commands that list things accept `--json` for scripts.
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | Success: the command ran, and every gate it checked holds |
+| `1` | An error, a failing gate, or a rebase that ended in a conflict |
+| `2` | Wrong usage |
+| `3` | A rebase is paused and waits for you: a trained adapter has to be loaded into the endpoint |
+
+## Contents
+
+- [Genome](#genome): `init`, `status`, `rule add`, `capture`
+- [Checking](#checking): `check`, `verify`, `models`
+- [Rebasing](#rebasing): `rebase`, `log`, `show`
+
+## Genome
+
+### `graft init [folder]`
+
+Starts a genome: writes `graft.toml`, creates `genome/` with its subfolders, and adds `.graft/` to `.gitignore`. Changes nothing if `graft.toml` is already there.
+
+### `graft status`
+
+The genome id, each rule with its number of cases, pairs and weakly verified cases, and any rebase in progress.
+
+| Option | Meaning |
+|---|---|
+| `--json` | The same as JSON, with each rule's statement |
+
+### `graft rule add <id> <statement>`
+
+Adds `genome/rules/<id>.toml`. The statement is the behavior in a sentence or two.
+
+| Option | Meaning |
+|---|---|
+| `--gate <share>` | The share of the rule's cases that must pass. Default `1.0` |
+
+### `graft capture goethe <folder>`
+
+Reads a [Goethe](https://github.com/meshapplied/goethe) trace folder and adds one case per chat-completions turn that finished cleanly. The request is the turn's full history, rebuilt through its parent turns; the reference is the recorded reply. Verifiers are derived from the reply: exact tool calls, exact JSON, or `similar` for plain text. A regenerated reply replaces the earlier one for the same request. Turns from other APIs, failed or cut-off turns, and turns whose history is gone are skipped and counted.
+
+| Option | Meaning |
+|---|---|
+| `--rule <id>` | The rule the cases go under. Default `recorded`; it is created if missing |
+| `--model <id>` | Only turns served by this model id |
+| `--since <time>` | Only turns that started at or after this UTC time, for example `2026-11-01` |
+| `--tools-only` | Only turns whose reply calls a tool: these get exact verifiers |
+| `--limit <n>` | Add at most this many cases |
+| `--dry-run` | Say what would be added; write nothing |
+
+Running it again adds only cases that are not there yet.
+
+### `graft capture jsonl <file>`
+
+Reads a chat fine-tuning file: one `{"messages": [...], "tools": [...]}` object per line. The last assistant message is the reference and everything before it the request.
+
+| Option | Meaning |
+|---|---|
+| `--every-turn` | A case for every assistant turn, not just the last |
+| `--rule`, `--limit`, `--dry-run` | As for `capture goethe` |
+
+## Checking
+
+### `graft check`
+
+Checks the genome against the model that has the behavior today. A case that fails here has a wrong verifier, or describes behavior the source never had; a rebase leaves such cases out. Exits 1 when a case fails.
+
+| Option | Meaning |
+|---|---|
+| `--model <name>` | Ask this model. Default: check each case's recorded reference against its verifiers, which needs no model |
+| `--json` | The failing cases with their replies |
+
+### `graft verify <model>`
+
+Runs every gate against a model and exits 0 only when all hold. Prints each rule with its pass count and the first failing cases.
+
+| Option | Meaning |
+|---|---|
+| `--graft [run]` | Apply the graft of a rebase: its prompt block, or its trained adapter. Without a run, the latest rebase |
+| `--rule <id>` | Only this rule. Repeatable |
+| `--json` | Every gate and every failing case with its reply |
+
+Use it in CI to gate any change to a model, a prompt or the serving stack.
+
+### `graft models`
+
+Lists the models in `graft.toml` and sends each endpoint one short request to see whether it answers. Models loaded in process are listed but not loaded. Exits 1 when a model does not answer.
+
+## Rebasing
+
+### `graft rebase --target <model>`
+
+Carries the genome onto a new base model. It checks the genome against the source, then climbs the ladder and stops at the first rung where every gate holds. See [the user guide](user-guide.md#rebase) for what each rung does.
+
+| Option | Meaning |
+|---|---|
+| `--target <model>` | The new base |
+| `--source <model>` | The model that has the behavior today. Default: `[rebase] source`; without one, the recorded references stand in |
+| `--ladder <rungs>` | Rungs to try, comma-separated: `zero-shot`, `prompt`, `lora`. Default: `[rebase] ladder`, else `zero-shot,prompt` |
+| `--rounds <n>` | Attempts per rung. Default: `[rebase] rounds`, else 3 |
+| `--continue` | Pick up the rebase in progress |
+| `--abort` | Drop the rebase in progress. Nothing it trained or recorded is deleted |
+
+One rebase can be in progress at a time. It ends in one of three ways:
+
+- **Passed** (exit 0). Every gate holds. The certificate is written and the rebase is no longer in progress.
+- **Conflict** (exit 1). The ladder is used up and cases still fail, or a suite gate fails. A certificate marked as not passed lists them. Change the genome, the ladder or the trainer, then `graft rebase --continue`: it checks the current graft against the genome as it is now, and carries on from the rung it stopped at. `--ladder` and `--rounds` can be given with `--continue`.
+- **Paused** (exit 3). An adapter is trained and the endpoint has to load it. Load it under the model's `adapter_model` name, then `graft rebase --continue`.
+
+If the target stops answering mid-run, the rebase stops with an error and stays in progress; `--continue` resumes it.
+
+### `graft log`
+
+Past rebases, newest first: run, status, outcome, the last pass count, start time and source.
+
+### `graft show [run]`
+
+Prints a rebase's certificate as a readable report and checks its digest. Exits 1 if the file was changed after graft wrote it.
+
+| Option | Meaning |
+|---|---|
+| `--json` | The certificate itself |
+| `--graft` | Print the graft instead: the system prompt block of a prompt graft, or the adapter path of a trained one |
+
+A run's files are in `.graft/grafts/<target>/<run>/`: `certificate.json`, `REPORT.md`, `graft.json`, the evaluation of every step under `evals/`, and each training round's dataset, log and adapter under `lora/`.

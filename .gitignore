@@ -1,0 +1,22 @@
+.venv/
+.venv*/
+__pycache__/
+*.pyc
+.env
+.env.*
+*.pem
+*credentials*
+*.safetensors
+*.gguf
+*.bin
+*.pt
+*.pth
+.cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# rebase runs: evaluations, trained adapters, certificates
+.graft/

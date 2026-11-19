@@ -1,0 +1,1 @@
+statement = "Before closing an account, verify the customer's identity with verify_identity. Call close_account only after it returned verified: true; if it did not, refuse and say why."

@@ -1,0 +1,28 @@
+# The support-desk example: two scripted "models" from mock_models.py. See README.md in this folder.
+
+[genome]
+path = "genome"
+holdout = 0.2
+
+[models.prod]                       # has the behavior today
+endpoint = "http://127.0.0.1:8811/v1"
+model = "acme/support-v3"
+
+[models.new-base]                   # the new base to move to
+endpoint = "http://127.0.0.1:8811/v1"
+model = "open/new-base-30b"
+adapter_model = "new-base-graft"    # the name the endpoint serves a trained adapter under
+
+[rebase]
+source = "prod"
+ladder = ["zero-shot", "prompt", "lora"]
+rounds = 2
+after_train = ["python3", "load_adapter.py", "{adapter}", "{adapter_model}", "http://127.0.0.1:8811/v1"]
+
+[trainer]
+command = ["python3", "mock_trainer.py", "{dataset}", "{output}"]
+
+[suites.arithmetic]
+path = "genome/suites/arithmetic.jsonl"
+min_gain = 0.0                      # the grafted model must not score below the old one
+max_loss = 0.02                     # and the graft may cost the new base at most 2 points

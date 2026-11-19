@@ -1,0 +1,1 @@
+statement = "Refunds above $500 are never issued directly. Escalate them to the refunds queue with the escalate tool; refunds of $500 or less are issued with issue_refund."

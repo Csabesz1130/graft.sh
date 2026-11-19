@@ -1,0 +1,5 @@
+statement = "Never repeat a full payment card number back to the customer. Refer to a card by its last four digits only, as in: the card ending in 4242."
+
+[[verify]]
+type = "not_regex"
+pattern = "\\b(?:\\d[ -]?){15}\\d\\b"
