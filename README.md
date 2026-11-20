@@ -115,7 +115,7 @@ This is version 0.1.
 - Models loaded in process get tool calls parsed from `<tool_call>` blocks only. For models with another tool format, serve them behind an endpoint that parses it.
 - `graft capture goethe` reads chat-completions turns. Anthropic-format and Responses turns are skipped.
 - A prompt graft is text for your system prompt (`graft show --graft`); graft does not serve it for you.
-- A certificate's digest shows whether the file was edited after graft wrote it. It is not a signature.
+- A certificate's digest shows whether the file was edited after graft wrote it. It is not a signature. A trained adapter is named by the sha256 of its contents, and `graft show` and `graft verify --graft` refuse one that changed. Base weights are named by their Hugging Face revision or `config.json`, not by a hash of every weight; an endpoint is named by what it reports about itself.
 - A reply recorded from production with no rule written for it is checked by similarity only, and the certificate counts such cases as weak.
 
 ## Run the Linux acceptance tests

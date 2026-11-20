@@ -36,7 +36,19 @@ class Ladder(ExampleCase):
         self.assertFalse(held & {r["case"] for r in rows}, "held-out cases never reach the trainer")
         self.assertEqual({r["origin"] for r in rows}, {"own", "sampled", "source"})
         self.assertTrue(all(r["messages"][-1]["role"] == "assistant" for r in rows))
-        self.assertTrue(all(r["weight"] == (1 if r["origin"] == "own" else 2) for r in rows))
+        before = json.loads((self.run_dir() / "evals" / "prompt round 2.json").read_text())["results"]
+        failing = {c["rule"] for c in before if c["split"] == "train" and not c["ok"]}
+        self.assertTrue(failing)
+        self.assertTrue(all(r["weight"] == (2 if r["rule"] in failing else 1) for r in rows),
+                        "every row of a rule that still fails is weighted up, its passing replies too")
+        self.assertTrue(any(r["origin"] == "own" and r["weight"] == 2 for r in rows))
+        by_case = {}
+        for r in rows:
+            by_case.setdefault(r["case"], set()).add(r["weight"])
+        self.assertTrue(all(len(w) == 1 for w in by_case.values()), "both sides of a pair weigh the same")
+        cert = self.cert()
+        self.assertEqual(len(cert["graft"]["adapter_sha256"]), 64)
+        self.assertIn("Adapter contents", certificate.report(cert))
         graft = json.loads((self.run_dir() / "evals" / "prompt round 2.json").read_text())["graft"]
         shown = {case for cases in graft["exemplars"].values() for case in cases}
         self.assertTrue(shown)
@@ -53,6 +65,57 @@ class Ladder(ExampleCase):
         self.assertIn("**PASSED.**", out)
         code, out, _ = self.graft("log")
         self.assertIn("passed    lora", out)
+
+    def test_graft_means_the_latest_passed_run(self):
+        self.assertEqual(self.graft("rebase", "--target", "new-base")[0], 0)
+        self.assertEqual(self.graft("rebase", "--target", "new-base", "--ladder", "zero-shot")[0], 1)
+        self.assertEqual(self.graft("rebase", "--abort")[0], 0)
+        code, out, _ = self.graft("verify", "new-base", "--graft")
+        self.assertEqual(code, 0, "an aborted run after it does not hide the graft that passed")
+        self.assertIn("with the trained adapter", out)
+        code, out, _ = self.graft("show", "--graft")
+        self.assertEqual(code, 0)
+        self.assertIn("adapter", out)
+        aborted = next(r for r in json.loads(self.graft("log", "--json")[1]) if r["status"] == "aborted")
+        code, _, err = self.graft("show", "--graft", f"{aborted['target']}/{aborted['run']}")
+        self.assertEqual(code, 1)
+        self.assertIn("aborted; it has no graft to apply", err)
+
+    def test_only_aborted_runs_means_no_graft(self):
+        self.assertEqual(self.graft("rebase", "--target", "new-base", "--ladder", "zero-shot")[0], 1)
+        self.assertEqual(self.graft("rebase", "--abort")[0], 0)
+        code, _, err = self.graft("verify", "new-base", "--graft")
+        self.assertEqual(code, 1)
+        self.assertIn("was aborted, so there is no graft to use", err)
+
+    def test_a_changed_adapter_is_caught(self):
+        self.assertEqual(self.graft("rebase", "--target", "new-base")[0], 0)
+        adapter = next(self.run_dir().glob("lora/round-*/adapter"))
+        self.assertEqual(self.graft("show")[0], 0)
+        (adapter / "learned.json").write_text('{"rules": []}')
+        code, _, err = self.graft("show")
+        self.assertEqual(code, 1, "show fails when the adapter is not the one the certificate names")
+        self.assertIn("was changed after the rebase", err)
+        code, _, err = self.graft("verify", "new-base", "--graft")
+        self.assertEqual(code, 1)
+        self.assertIn("restore it or run the rebase again", err)
+
+    def test_graft_digest_does_not_depend_on_the_folder(self):
+        self.assertEqual(self.graft("rebase", "--target", "new-base")[0], 0)
+        first = self.cert()["graft"]
+        self.assertEqual(self.graft("rebase", "--target", "new-base")[0], 0)
+        runs = sorted((self.root / ".graft" / "grafts" / "new-base").glob("*/certificate.json"))
+        second = json.loads(runs[-1].read_text())["graft"]
+        self.assertNotEqual(first["adapter"], second["adapter"])
+        self.assertEqual(first["adapter_sha256"], second["adapter_sha256"])
+        self.assertEqual(first["sha256"], second["sha256"])
+
+    def test_conflict_report_says_held_out_cases_were_not_consulted(self):
+        code, _, _ = self.graft("rebase", "--target", "new-base", "--ladder", "zero-shot")
+        self.assertEqual(code, 1)
+        report = certificate.report(self.cert())
+        self.assertIn("never steered the search", report)
+        self.assertNotIn("after the training cases all passed", report)
 
     def test_same_model_is_a_fast_forward(self):
         code, out, _ = self.graft("rebase", "--target", "prod", "--source", "prod")

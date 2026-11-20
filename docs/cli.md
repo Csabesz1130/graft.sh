@@ -18,9 +18,9 @@ Exit codes:
 
 | Code | Meaning |
 |---|---|
-| `0` | Success: the command ran, and every gate it checked holds |
+| `0` | Success: the command ran, and every gate it checked holds. `graft` with no command prints this help and exits 0 |
 | `1` | An error, a failing gate, or a rebase that ended in a conflict |
-| `2` | Wrong usage |
+| `2` | Wrong usage: an unknown command or option, or a malformed argument such as a rule id or gate share |
 | `3` | A rebase is paused and waits for you: a trained adapter has to be loaded into the endpoint |
 
 ## Contents
@@ -33,7 +33,7 @@ Exit codes:
 
 ### `graft init [folder]`
 
-Starts a genome: writes `graft.toml`, creates `genome/` with its subfolders, and adds `.graft/` to `.gitignore`. Changes nothing if `graft.toml` is already there.
+Starts a genome: writes `graft.toml`, creates `genome/` with its subfolders, and adds `.graft/` to `.gitignore`. If `graft.toml` is already there it changes nothing and exits 1.
 
 ### `graft status`
 
@@ -45,11 +45,11 @@ The genome id, each rule with its number of cases, pairs and weakly verified cas
 
 ### `graft rule add <id> <statement>`
 
-Adds `genome/rules/<id>.toml`. The statement is the behavior in a sentence or two.
+Adds `genome/rules/<id>.toml`. The statement is the behavior in a sentence or two. An id holds letters, digits, dot, dash and underscore; any other id is wrong usage (exit 2) and writes nothing.
 
 | Option | Meaning |
 |---|---|
-| `--gate <share>` | The share of the rule's cases that must pass. Default `1.0` |
+| `--gate <share>` | The share of the rule's cases that must pass, above 0 and at most 1. Default `1.0` |
 
 ### `graft capture goethe <folder>`
 
@@ -92,9 +92,11 @@ Runs every gate against a model and exits 0 only when all hold. Prints each rule
 
 | Option | Meaning |
 |---|---|
-| `--graft [run]` | Apply the graft of a rebase: its prompt block, or its trained adapter. Without a run, the latest rebase |
+| `--graft [run]` | Apply the graft of a rebase: its prompt block, or its trained adapter. Without a run, or with only a target, the latest rebase that was not aborted |
 | `--rule <id>` | Only this rule. Repeatable |
 | `--json` | Every gate and every failing case with its reply |
+
+With `--graft`, a trained adapter whose files changed since the rebase is refused (exit 1): the run recorded its contents' sha256.
 
 Use it in CI to gate any change to a model, a prompt or the serving stack.
 
@@ -131,11 +133,11 @@ Past rebases, newest first: run, status, outcome, the last pass count, start tim
 
 ### `graft show [run]`
 
-Prints a rebase's certificate as a readable report and checks its digest. Exits 1 if the file was changed after graft wrote it.
+Prints a rebase's certificate as a readable report and checks its digest. Exits 1 if the file was changed after graft wrote it, or if the trained adapter it names no longer has the contents it was certified with.
 
 | Option | Meaning |
 |---|---|
 | `--json` | The certificate itself |
-| `--graft` | Print the graft instead: the system prompt block of a prompt graft, or the adapter path of a trained one |
+| `--graft` | Print the graft instead: the system prompt block of a prompt graft, or the adapter path of a trained one. Without a run, the latest rebase that was not aborted; an aborted run named exactly exits 1 |
 
 A run's files are in `.graft/grafts/<target>/<run>/`: `certificate.json`, `REPORT.md`, `graft.json`, the evaluation of every step under `evals/`, and each training round's dataset, log and adapter under `lora/`.

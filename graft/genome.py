@@ -34,6 +34,18 @@ def digest(value: Any) -> str:
     return hashlib.sha256(canonical(value).encode("utf-8")).hexdigest()
 
 
+def tree_digest(folder: Path) -> str:
+    """The sha256 of a folder's contents: every file's path relative to the folder, and its bytes."""
+    whole = hashlib.sha256()
+    for path in sorted(p for p in Path(folder).rglob("*") if p.is_file()):
+        part = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for block in iter(lambda: handle.read(1 << 20), b""):
+                part.update(block)
+        whole.update(f"{path.relative_to(folder).as_posix()}\0{part.hexdigest()}\n".encode())
+    return whole.hexdigest()
+
+
 @dataclass
 class Unit:
     """One request and what its reply must satisfy. A plain case has one unit, a counterfactual pair two."""

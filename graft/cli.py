@@ -16,6 +16,24 @@ ERRORS = (config.ConfigError, genome.GenomeError, runners.RunnerError, verifiers
           rebase.RebaseError, capture.CaptureError)
 
 
+def _rule_id(value: str) -> str:
+    """A rule id as argparse sees it, so a bad one is a usage error (exit 2) and touches nothing."""
+    if not genome.ID.match(value):
+        raise argparse.ArgumentTypeError(f"{value!r}: letters, digits, dot, dash and underscore only, "
+                                         f"starting with a letter or digit")
+    return value
+
+
+def _share_arg(value: str) -> float:
+    try:
+        share = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a number") from None
+    if not 0.0 < share <= 1.0:
+        raise argparse.ArgumentTypeError(f"{value} is not a share between 0 (exclusive) and 1")
+    return share
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=PROG, description="Rebase a model's verified behavior onto a new base model.")
     p.add_argument("--version", action="version", version=f"{PROG} {__version__}")
@@ -30,9 +48,10 @@ def _parser() -> argparse.ArgumentParser:
     rule = sub.add_parser("rule", help="add a rule")
     rule_sub = rule.add_subparsers(dest="action", metavar="action", required=True)
     add = rule_sub.add_parser("add", help="add a rule: an id and the behavior in a sentence or two")
-    add.add_argument("id")
+    add.add_argument("id", type=_rule_id)
     add.add_argument("statement")
-    add.add_argument("--gate", type=float, default=1.0, help="share of the rule's cases that must pass. default 1.0")
+    add.add_argument("--gate", type=_share_arg, default=1.0,
+                     help="share of the rule's cases that must pass. default 1.0")
 
     cap = sub.add_parser("capture", help="turn recorded traffic into cases")
     cap_sub = cap.add_subparsers(dest="kind", metavar="kind", required=True)
@@ -166,7 +185,9 @@ def _capture(args: argparse.Namespace) -> int:
     if args.kind == "goethe":
         cases, skipped = capture.from_goethe(args.folder, args.model, args.since, args.tools_only)
     else:
-        cases, skipped = capture.from_jsonl(args.file, args.every_turn), {}
+        if not Path(args.file).is_file():
+            raise capture.CaptureError(f"{args.file}: no such file")
+        cases, skipped = capture.from_jsonl(Path(args.file), args.every_turn), {}
     if args.limit is not None:
         cases = cases[:args.limit]
     weak = sum(verifiers.weak_only(c["verify"]) for c in cases)
@@ -234,8 +255,11 @@ def _verify(args: argparse.Namespace) -> int:
     found = _load(project)
     graft: dict[str, Any] = {"kind": "none"}
     if args.graft is not None:
-        state = rebase.find_run(project, args.graft or None)
+        state = rebase.find_run(project, args.graft or None, for_graft=True)
         graft = state["graft"]
+        problem = rebase.adapter_problem(graft)
+        if problem:
+            raise rebase.RebaseError(f"{problem}; restore it or run the rebase again")
     runner = runners.build(args.model, project.model(args.model), project.root, adapter=graft.get("adapter"))
     cases = [c for c in found.cases if not args.rule or c.rule in args.rule]
     unknown = [r for r in args.rule if r not in found.rules]
@@ -314,7 +338,7 @@ def _log(args: argparse.Namespace) -> int:
 
 def _show(args: argparse.Namespace) -> int:
     project = config.load()
-    state = rebase.find_run(project, args.run)
+    state = rebase.find_run(project, args.run, for_graft=args.graft)
     folder = rebase.run_dir_of(project, state)
     if args.graft:
         graft = state["graft"]
@@ -322,8 +346,13 @@ def _show(args: argparse.Namespace) -> int:
             print(graft["system"])
         elif graft.get("kind") == "lora":
             print(graft["adapter"])
-        else:
+        elif state.get("status") == "passed":
             print("no graft: the new model already passes as it is", file=sys.stderr)
+        elif state.get("status") != "aborted":
+            print(f"{state['target']}/{state['run']} is {state['status']}; it has no graft yet", file=sys.stderr)
+        else:
+            print(f"{state['target']}/{state['run']} is {state['status']}; it has no graft to apply", file=sys.stderr)
+            return 1
         return 0
     path = folder / "certificate.json"
     if not path.is_file():
@@ -336,6 +365,10 @@ def _show(args: argparse.Namespace) -> int:
         print(certificate.report(cert), end="")
     if not certificate.intact(cert):
         print(f"\nWARNING: {path} was changed after graft wrote it: its digest no longer matches.", file=sys.stderr)
+        return 1
+    problem = rebase.adapter_problem(cert.get("graft") or {})
+    if problem:
+        print(f"\nWARNING: {problem}. This certificate does not describe what is on disk now.", file=sys.stderr)
         return 1
     return 0
 

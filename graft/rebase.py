@@ -23,7 +23,7 @@ from typing import Any
 from graft import certificate, evaluate, runners, verifiers
 from graft.config import Project
 from graft.evaluate import CaseResult
-from graft.genome import Case, Genome, Unit, load_suite
+from graft.genome import Case, Genome, Unit, load_suite, tree_digest
 
 HEAD = "REBASE_HEAD"
 PASSED, CONFLICT, PAUSED = 0, 1, 3
@@ -64,17 +64,29 @@ def run_dir_of(project: Project, state: dict[str, Any]) -> Path:
     return project.state_dir / "grafts" / state["target"] / state["run"]
 
 
-def find_run(project: Project, wanted: str | None) -> dict[str, Any]:
-    """A run by `target`, `target/run`, or run id; the latest one when nothing is named."""
+def find_run(project: Project, wanted: str | None, for_graft: bool = False) -> dict[str, Any]:
+    """A run by `target`, `target/run`, or run id; the latest one when nothing is named.
+
+    With `for_graft`, a target or nothing skips aborted runs: their graft was given up, and an aborted run
+    must not hide the graft of a run before it. A run named exactly is returned whatever its status.
+    """
     known = runs(project)
     if not known:
         raise RebaseError("no rebase has run here yet")
-    if not wanted:
-        return known[-1]
-    picks = [s for s in known if wanted in (s["target"], s["run"], f"{s['target']}/{s['run']}")]
-    if not picks:
-        raise RebaseError(f"no rebase matches {wanted!r}; `graft log` lists them")
-    return picks[-1]
+    if wanted:
+        exact = [s for s in known if wanted in (s["run"], f"{s['target']}/{s['run']}")]
+        if exact:
+            return exact[-1]
+        known = [s for s in known if s["target"] == wanted]
+        if not known:
+            raise RebaseError(f"no rebase matches {wanted!r}; `graft log` lists them")
+    if for_graft:
+        known = [s for s in known if s.get("status") != "aborted"]
+        if not known:
+            onto = f" onto {wanted}" if wanted else ""
+            raise RebaseError(f"every rebase{onto} was aborted, so there is no graft to use; "
+                              f"name a run to use its graft anyway (`graft log` lists them)")
+    return known[-1]
 
 
 def abort(project: Project) -> dict[str, Any] | None:
@@ -86,6 +98,18 @@ def abort(project: Project) -> dict[str, Any] | None:
         path.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     head_path(project).unlink(missing_ok=True)
     return state
+
+
+def adapter_problem(graft: dict[str, Any]) -> str | None:
+    """Why a trained adapter on disk is not the one a rebase recorded, or None when it is (or is not known)."""
+    expected, adapter = graft.get("adapter_sha256"), graft.get("adapter")
+    if not expected or not adapter:
+        return None
+    if not Path(adapter).exists():
+        return f"the adapter {adapter} is gone"
+    if tree_digest(Path(adapter)) != expected:
+        return f"the adapter {adapter} was changed after the rebase recorded it (its contents no longer match)"
+    return None
 
 
 def prompt_block(genome: Genome, rules: list[str], exemplars: dict[str, list[str]]) -> str:
@@ -335,18 +359,26 @@ class Rebase:
 
         The new model's own passing reply is preferred (it keeps the new model's voice); for a failing case
         a few sampled attempts are tried, and only then the source's recorded reply is used.
+
+        Weights are per rule, not per reply: every row of a rule that still fails counts `2 ** number` times
+        (at most 8), passing rows included. Weighting only the failing replies tips the balance of a rule
+        towards whichever side failed last, and on a boundary rule (refunds up to $500 issued, above that
+        escalated, pinned by counterfactual pairs) the next round then fails the other side.
         """
         samples, heat = int(self.opt("samples", 4)), float(self.opt("temperature", 0.8))
         weight = min(2 ** number, 8)
+        failing = {case.rule for case in self.cases if case.split == "train"
+                   and not ((seen := self.last.get(case.id)) and seen.ok)}
 
         def row(case: Case, index: int, unit: Unit) -> dict[str, Any] | None:
             context = {"reference": unit.reference, "messages": unit.messages, "case": case.id,
                        "cwd": self.project.root}
             seen = self.last.get(case.id)
+            times = weight if case.rule in failing else 1
             if seen and seen.unit_ok[index]:
-                reply, origin, times = seen.replies[index], "own", 1
+                reply, origin = seen.replies[index], "own"
             else:
-                reply, origin, times = None, "sampled", weight
+                reply, origin = None, "sampled"
                 for attempt in range(samples):
                     try:
                         candidate = sampler.reply(unit, graft, temperature=heat, seed=1000 * number + attempt)
@@ -444,6 +476,8 @@ class Rebase:
                              f"Set [rebase] after_train to a command that loads it, and this step runs unattended.")
                     return PAUSED
             graft = {"kind": "lora", "adapter": str(adapter)}
+            if adapter.exists():
+                graft["adapter_sha256"] = tree_digest(adapter)
             extra = extra or self.state.pop("pending", None) or {}
             self.state["graft"], self.state["round"] = graft, number
             if self.check(f"lora round {number}", graft, extra):

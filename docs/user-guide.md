@@ -182,7 +182,7 @@ It reads the base weights from the target's `weights`, `path` or `model`, in tha
 2. Otherwise, a sampled attempt from the new model (with the prompt graft, if there is one) that passes: up to `samples` attempts at `temperature`. The verifiers act as the reward: only attempts they accept are kept.
 3. Otherwise, the source's recorded reference.
 
-Rows from 2 and 3 are weighted up, more in later rounds. Training requests do not contain the prompt graft, so what the prompt achieved is learned into the adapter. The certificate reports how many rows came from each origin.
+Every row of a rule that still fails is weighted up, more in later rounds: its passing replies as well as the corrected ones. Weighting only the corrected replies would tip a boundary rule (refunds up to $500 issued, above that escalated) towards whichever side failed last, and the next round would fail the other side. Training requests do not contain the prompt graft, so what the prompt achieved is learned into the adapter. The certificate reports how many rows came from each origin.
 
 **Your own trainer.** Any command that reads the dataset and writes an adapter folder works:
 

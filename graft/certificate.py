@@ -8,6 +8,13 @@ from graft.evaluate import CaseResult
 from graft.genome import Genome, digest
 
 
+def _totals(found: list[evaluate.Gate], consulted: int) -> dict[str, Any]:
+    """Totals with the bound allowing for every look, and the true number of looks for the report."""
+    totals = evaluate.totals(found, looks=consulted)
+    totals["holdout"]["consulted"] = consulted
+    return totals
+
+
 def build(state: dict[str, Any], genome: Genome, results: dict[str, CaseResult], passed: bool,
           suites: list[dict[str, Any]], target_fingerprint: dict[str, Any],
           raw: dict[str, CaseResult] | None = None) -> dict[str, Any]:
@@ -15,12 +22,16 @@ def build(state: dict[str, Any], genome: Genome, results: dict[str, CaseResult],
     kept = {case: result for case, result in results.items() if case not in excluded}
     found = evaluate.gates(genome, kept, set(excluded))
     graft = state["graft"]
-    described: dict[str, Any] = {"kind": graft.get("kind", "none"), "sha256": digest(graft)}
+    # the folder an adapter happens to sit in is not part of what the graft is
+    described: dict[str, Any] = {"kind": graft.get("kind", "none"),
+                                 "sha256": digest({k: v for k, v in graft.items() if k != "adapter"})}
     if graft.get("kind") == "prompt":
         described["rules_stated"] = len(graft.get("rules", []))
         described["examples"] = sum(len(v) for v in graft.get("exemplars", {}).values())
     if graft.get("adapter"):
         described["adapter"] = graft["adapter"]
+    if graft.get("adapter_sha256"):
+        described["adapter_sha256"] = graft["adapter_sha256"]
     cert: dict[str, Any] = {
         "certificate": 1,
         "graft_version": __version__,
@@ -32,7 +43,7 @@ def build(state: dict[str, Any], genome: Genome, results: dict[str, CaseResult],
         "target": {"name": state["target"], "fingerprint": target_fingerprint},
         "graft": described,
         "gates": [g.to_json() for g in found],
-        "totals": evaluate.totals(found, looks=state.get("holdout_looks", 1)),
+        "totals": _totals(found, state.get("holdout_looks", 1)),
         "ladder": state.get("stages", []),
         "excluded": [{"case": case, "rule": genome.case(case).rule, "reason": reason}
                      for case, reason in sorted(excluded.items())],
@@ -80,6 +91,7 @@ def report(cert: dict[str, Any]) -> str:
         f"| Source | {cert['source']['name']} |",
         f"| Target | {cert['target']['name']} |",
         f"| Graft | {kinds.get(graft['kind'], graft['kind'])} |",
+        *([f"| Adapter contents | sha256 `{graft['adapter_sha256']}` |"] if graft.get("adapter_sha256") else []),
         f"| Run | {cert['run']}, {cert.get('started')} to {cert.get('finished')} |",
         f"| Digest | `{cert['digest']}` |",
         "",
@@ -103,10 +115,15 @@ def report(cert: dict[str, Any]) -> str:
         lines.append(f"- {_share(free['passed'], free['total'])} cases already passed on the new model "
                      f"before any graft.")
     if held["total"]:
-        looks = held.get("looks", 1)
-        consulted = ("They were consulted once, after the training cases all passed."
-                     if looks == 1 else f"They were consulted {looks} times, each time after the training cases "
-                                        f"all passed; the bound below allows for that.")
+        looks = held.get("consulted", held.get("looks", 1))
+        if looks == 0:
+            consulted = ("The training cases never all passed, so the held-out results never steered the "
+                         "search.")
+        elif looks == 1:
+            consulted = "They were consulted once, after the training cases all passed."
+        else:
+            consulted = (f"They were consulted {looks} times, each time after the training cases all passed; "
+                         f"the bound below allows for that.")
         lines.append(f"- {_share(held['passed'], held['total'])} held-out cases pass. No prompt example and no "
                      f"training row was made from them. {consulted} With {held['confidence']:.0%} confidence, "
                      f"the new model passes at least {held['lower_bound']:.1%} of cases drawn the way these "

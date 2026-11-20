@@ -35,6 +35,13 @@ class Fresh(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual((self.root / ".gitignore").read_text(), "node_modules/\n.graft/\n")
         self.assertEqual(self.graft("init")[0], 1, "a second init changes nothing")
+        self.assertEqual(self.graft("rule", "add", "../escape", "x")[0], 2, "a bad rule id is wrong usage")
+        self.assertEqual(self.graft("rule", "add", "ok-id", "x", "--gate", "1.5")[0], 2, "a gate is a share")
+        self.assertFalse(list(self.root.rglob("*escape*")) or (self.root / "genome/rules/ok-id.toml").exists())
+        code, _, err = self.graft("capture", "jsonl", "missing.jsonl")
+        self.assertEqual(code, 1)
+        self.assertIn("missing.jsonl: no such file", err)
+        self.assertNotIn("Traceback", err)
 
         code, out, _ = self.graft("rule", "add", "refund-limit", "Refunds above $500 go to a human.", "--gate", "0.9")
         self.assertEqual(code, 0)

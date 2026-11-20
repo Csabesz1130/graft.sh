@@ -245,6 +245,15 @@ class HF(Runner):
     def fingerprint(self) -> dict[str, Any]:
         info: dict[str, Any] = {"runner": "hf", "path": self.path}
         config = Path(self.path) / "config.json"
+        if not config.is_file():   # a Hugging Face id: the cached snapshot names the exact revision loaded
+            try:
+                from huggingface_hub import try_to_load_from_cache
+                cached = try_to_load_from_cache(self.path, "config.json")
+            except Exception:   # no huggingface_hub, or not a valid repo id: the path alone names the model
+                cached = None
+            if isinstance(cached, str):
+                config = Path(cached)
+                info["revision"] = config.parent.name
         if config.is_file():
             info["config_sha256"] = hashlib.sha256(config.read_bytes()).hexdigest()
         if self.adapter:
