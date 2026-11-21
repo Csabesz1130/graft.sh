@@ -1,8 +1,10 @@
 import json
+import shutil
 import unittest
+from pathlib import Path
 
 from graft import certificate, rebase
-from tests.support import ExampleCase
+from tests.support import ExampleCase, graft
 
 
 class Ladder(ExampleCase):
@@ -154,6 +156,45 @@ class Ladder(ExampleCase):
         code, _, err = self.graft("verify", "new-base", "--graft")
         self.assertEqual(code, 1)
         self.assertIn("was aborted, so there is no graft to use", err)
+
+    def test_a_project_moved_elsewhere_keeps_its_graft(self):
+        self.assertEqual(self.graft("rebase", "--target", "new-base")[0], 0)
+        state = json.loads(next((self.root / ".graft" / "grafts").glob("*/*/state.json")).read_text())
+        self.assertFalse(Path(state["graft"]["adapter"]).is_absolute(), "runs record the adapter inside the project")
+        moved = self.root.parent / "copied-elsewhere"
+        shutil.copytree(self.root, moved)
+        shutil.rmtree(self.root)   # nothing may still point at the old folder
+        code, out, err = graft("show", cwd=moved)
+        self.assertEqual(code, 0, out + err)
+        code, out, _ = graft("show", "--graft", cwd=moved)
+        self.assertTrue(out.strip().startswith(str(moved)), out)
+        code, out, err = graft("verify", "new-base", "--graft", cwd=moved)
+        self.assertEqual(code, 0, out + err)
+
+    def test_loaded_models_are_freed_before_training(self):
+        import os
+        from unittest import mock
+
+        from graft import cli, runners
+        events = []
+        argv, close = rebase.trainer_argv, runners.Runner.close
+
+        def record_argv(*args, **kwargs):   # built just before the trainer process starts
+            events.append("train")
+            return argv(*args, **kwargs)
+
+        def record_close(this):
+            events.append("close")
+            return close(this)
+
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(self.root)
+        with mock.patch.object(rebase, "trainer_argv", record_argv), \
+                mock.patch.object(runners.Runner, "close", record_close):
+            self.assertEqual(cli.main(["rebase", "--target", "new-base"]), 0)
+        self.assertIn("train", events)
+        self.assertIn("close", events[:events.index("train")], "the trainer gets the memory this process held")
 
     def test_a_changed_adapter_is_caught(self):
         self.assertEqual(self.graft("rebase", "--target", "new-base")[0], 0)

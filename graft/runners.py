@@ -270,7 +270,15 @@ class HF(Runner):
         return info
 
     def close(self) -> None:
+        """Drop the weights and give their GPU memory back, so another copy or the trainer can use it."""
+        if self._loaded is None:
+            return
+        torch = self._loaded[0]
         self._loaded = None
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 def dtype_argument() -> str:

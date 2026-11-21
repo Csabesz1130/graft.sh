@@ -119,6 +119,17 @@ class Trainer(unittest.TestCase):
         self.assertEqual(done.returncode, 2)
         self.assertIn("must be a JSON object", done.stderr)
 
+    def test_close_frees_the_model_and_it_loads_again(self):
+        from graft import runners
+        runner = runners.build("tiny", {"path": str(self.root / "base"), "max_new_tokens": 4, "device": "cpu"},
+                               self.root)
+        first = runner.complete([{"role": "user", "content": "What is the refund limit?"}])
+        self.assertIsNotNone(runner._loaded)
+        runner.close()
+        self.assertIsNone(runner._loaded, "close drops the weights")
+        runner.close()   # closing twice is harmless
+        self.assertEqual(runner.complete([{"role": "user", "content": "What is the refund limit?"}]), first)
+
     def test_replay_rows_are_distilled_from_the_base(self):
         rows = [{"messages": [{"role": "user", "content": q}, {"role": "assistant", "content": a}], "tools": [],
                  "weight": 1, "case": f"replay-{i}", "rule": None, "origin": "replay"}

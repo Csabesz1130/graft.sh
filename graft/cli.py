@@ -257,10 +257,12 @@ def _verify(args: argparse.Namespace) -> int:
     if args.graft is not None:
         state = rebase.find_run(project, args.graft or None, for_graft=True)
         graft = state["graft"]
-        problem = rebase.adapter_problem(graft)
+        problem = rebase.adapter_problem(graft, project.root)
         if problem:
             raise rebase.RebaseError(f"{problem}; restore it or run the rebase again")
-    runner = runners.build(args.model, project.model(args.model), project.root, adapter=graft.get("adapter"))
+    adapter = rebase.adapter_path(project.root, graft)
+    runner = runners.build(args.model, project.model(args.model), project.root,
+                           adapter=str(adapter) if adapter else None)
     cases = [c for c in found.cases if not args.rule or c.rule in args.rule]
     unknown = [r for r in args.rule if r not in found.rules]
     if unknown:
@@ -345,7 +347,7 @@ def _show(args: argparse.Namespace) -> int:
         if graft.get("kind") == "prompt":
             print(graft["system"])
         elif graft.get("kind") == "lora":
-            print(graft["adapter"])
+            print(rebase.adapter_path(project.root, graft))
         elif state.get("status") == "passed":
             print("no graft: the new model already passes as it is", file=sys.stderr)
         elif state.get("status") != "aborted":
@@ -366,7 +368,7 @@ def _show(args: argparse.Namespace) -> int:
     if not certificate.intact(cert):
         print(f"\nWARNING: {path} was changed after graft wrote it: its digest no longer matches.", file=sys.stderr)
         return 1
-    problem = rebase.adapter_problem(cert.get("graft") or {})
+    problem = rebase.adapter_problem(cert.get("graft") or {}, project.root)
     if problem:
         print(f"\nWARNING: {problem}. This certificate does not describe what is on disk now.", file=sys.stderr)
         return 1

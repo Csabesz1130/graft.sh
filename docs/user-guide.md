@@ -189,7 +189,7 @@ gradient_checkpointing = false
 
 It reads the base weights from the target's `weights`, `path` or `model`, in that order, and renders the training rows with the target's `template_args`.
 
-**Memory.** `gradient_checkpointing = true` keeps fewer activations and recomputes them in the backward pass: training takes less memory and each step takes longer. Turn it on when the model barely fits, for example a LoRA on Qwen3-8B on one 24 GB GPU. It works with `method = "full"` and with replay distillation as well.
+**Memory.** `gradient_checkpointing = true` keeps fewer activations and recomputes them in the backward pass: training takes less memory and each step takes longer. Turn it on when the model barely fits, for example a LoRA on Qwen3-8B on one 24 GB GPU. It works with `method = "full"` and with replay distillation as well. A model loaded in process is one full copy of its weights: graft keeps one copy of the new base loaded at a time (as it is, or with an adapter) and frees it before the trainer starts, so the trainer has the GPU to itself.
 
 **What it trains on.** For each training case, one reply that passes the case's verifiers, chosen in this order:
 

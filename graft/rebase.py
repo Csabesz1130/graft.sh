@@ -120,9 +120,16 @@ def abort(project: Project) -> dict[str, Any] | None:
     return state
 
 
-def adapter_problem(graft: dict[str, Any]) -> str | None:
+def adapter_path(root: Path, graft: dict[str, Any]) -> Path | None:
+    """A graft's trained adapter on disk. Runs record it relative to the project folder, so a project can be moved
+    or copied (to a GPU machine and back) and its grafts still resolve; older runs recorded an absolute path."""
+    adapter = graft.get("adapter")
+    return Path(root) / adapter if adapter else None
+
+
+def adapter_problem(graft: dict[str, Any], root: Path) -> str | None:
     """Why a trained adapter on disk is not the one a rebase recorded, or None when it is (or is not known)."""
-    expected, adapter = graft.get("adapter_sha256"), graft.get("adapter")
+    expected, adapter = graft.get("adapter_sha256"), adapter_path(root, graft)
     if not expected or not adapter:
         return None
     if not Path(adapter).exists():
@@ -224,16 +231,26 @@ class Rebase:
         return [c for c in self.genome.cases if c.id not in self.excluded]
 
     def runner_for(self, graft: dict[str, Any]) -> runners.Runner:
+        """The target with a graft's adapter, or as it is. Only one of them stays loaded at a time: a model loaded in
+        process is a full copy of the weights, and two copies of an 8B model do not fit on one 24 GB GPU."""
         adapter = graft.get("adapter")
         if not adapter:
+            self.release(keep=self.target)
             return self.target
         if adapter not in self._adapted:
             try:
-                self._adapted[adapter] = runners.build(self.state["target"], self.target_spec,
-                                                       self.project.root, adapter=adapter)
+                self._adapted[adapter] = runners.build(self.state["target"], self.target_spec, self.project.root,
+                                                       adapter=str(adapter_path(self.project.root, graft)))
             except runners.RunnerError as err:
                 raise RebaseError(str(err)) from err
+        self.release(keep=self._adapted[adapter])
         return self._adapted[adapter]
+
+    def release(self, keep: runners.Runner | None = None) -> None:
+        """Free every copy of the target loaded in this process but `keep`; each loads again when it is asked."""
+        for runner in [self.target, *self._adapted.values()]:
+            if runner is not keep:
+                runner.close()
 
     def keep(self, stage: str, results: dict[str, CaseResult]) -> None:
         """Write a step's replies to evals/, for reading later; nothing steers by them."""
@@ -440,6 +457,7 @@ class Rebase:
         return [r for r in rows if r is not None]
 
     def train(self, dataset: Path, output: Path, number: int) -> None:
+        self.release()   # the trainer is another process: it needs the GPU memory this one holds
         trainer = self.project.trainer
         base = str(self.target_spec.get("weights") or self.target_spec.get("path") or self.target_spec.get("model"))
         template = runners.template_args(self.state["target"], self.target_spec) or {}
@@ -582,7 +600,7 @@ class Rebase:
                              f"Load it into the endpoint as model {name!r}, then run `graft rebase --continue`.\n"
                              f"Set [rebase] after_train to a command that loads it, and this step runs unattended.")
                     return PAUSED
-            graft = {"kind": "lora", "adapter": str(adapter)}
+            graft = {"kind": "lora", "adapter": os.path.relpath(adapter, self.project.root)}
             if adapter.exists():
                 graft["adapter_sha256"] = tree_digest(adapter)
             extra = extra or self.state.pop("pending", None) or {}
