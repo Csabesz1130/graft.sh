@@ -17,11 +17,15 @@ from typing import Any
 from graft.runners import dtype_argument, hf_messages
 
 
-def encode(tokenizer: Any, row: dict[str, Any], max_length: int) -> tuple[list[int], list[int]] | None:
-    """Token ids and labels for one row; the labels cover the final assistant message only."""
-    messages, tools = hf_messages(row["messages"]), row.get("tools") or None
-    whole = tokenizer.apply_chat_template(messages, tools=tools, tokenize=False)
-    before = tokenizer.apply_chat_template(messages[:-1], tools=tools, add_generation_prompt=True, tokenize=False)
+def encode(tokenizer: Any, row: dict[str, Any], max_length: int,
+           template_args: dict[str, Any] | None = None) -> tuple[list[int], list[int]] | None:
+    """Token ids and labels for one row; the labels cover the final assistant message only.
+
+    template_args go to the chat template, as the hf runner passes them, so training and inference agree."""
+    messages, tools, extra = hf_messages(row["messages"]), row.get("tools") or None, template_args or {}
+    whole = tokenizer.apply_chat_template(messages, tools=tools, tokenize=False, **extra)
+    before = tokenizer.apply_chat_template(messages[:-1], tools=tools, add_generation_prompt=True, tokenize=False,
+                                           **extra)
     ids = tokenizer(whole, add_special_tokens=False)["input_ids"]
     if len(ids) > max_length:
         return None
@@ -59,6 +63,17 @@ def copies(weight: float) -> list[float]:
     return [1.0] * whole + ([part] if part > 1e-9 else [])
 
 
+def json_object(value: str) -> dict[str, Any]:
+    """--template-args: a JSON object."""
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as err:
+        raise argparse.ArgumentTypeError(f"not JSON: {err}") from None
+    if not isinstance(parsed, dict):
+        raise argparse.ArgumentTypeError("must be a JSON object, for example '{\"enable_thinking\": false}'")
+    return parsed
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m graft.train_hf", description=__doc__.splitlines()[0])
     parser.add_argument("--dataset", required=True, type=Path)
@@ -79,6 +94,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--targets", default="all-linear",
                         help="the layers a LoRA adapts: all-linear, or module names separated by commas "
                              "(on a hybrid model, attention and MLP layers only keeps the state-space layers intact)")
+    parser.add_argument("--template-args", type=json_object, default=None,
+                        help="a JSON object of keyword arguments for the chat template, for example "
+                             "'{\"enable_thinking\": false}'")
+    parser.add_argument("--gradient-checkpointing", action="store_true",
+                        help="recompute activations in the backward pass: less memory, slower steps")
     args = parser.parse_args(argv)
 
     try:
@@ -102,6 +122,11 @@ def main(argv: list[str] | None = None) -> int:
     model = AutoModelForCausalLM.from_pretrained(args.base, **kwargs)
     if cuda and "device_map" not in kwargs:
         model = model.to("cuda")
+    if args.gradient_checkpointing:
+        model.config.use_cache = False   # a cache is useless while training and conflicts with checkpointing
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        if args.method == "lora":
+            model.enable_input_require_grads()   # frozen embeddings: without this the adapter gets no gradient
     if args.method == "lora":
         from peft import LoraConfig, get_peft_model
         model = get_peft_model(model, LoraConfig(r=args.rank, lora_alpha=args.alpha, lora_dropout=0.0,
@@ -111,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     rows = [json.loads(line) for line in args.dataset.read_text(encoding="utf-8").splitlines() if line.strip()]
     examples, skipped = [], 0
     for row in rows:
-        encoded = encode(tokenizer, row, args.max_length)
+        encoded = encode(tokenizer, row, args.max_length, args.template_args)
         if encoded is None:
             skipped += 1
             continue
@@ -121,7 +146,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no row fits in {args.max_length} tokens", file=sys.stderr)
         return 1
     print(f"{len(rows)} rows, {len(examples)} after weights, {skipped} skipped as too long; "
-          f"method {args.method}, {args.epochs} epochs, lr {args.lr}, device {device}", flush=True)
+          f"method {args.method}, {args.epochs} epochs, lr {args.lr}, device {device}"
+          f"{', gradient checkpointing' if args.gradient_checkpointing else ''}", flush=True)
 
     distill = args.replay_loss == "kl" and args.method == "lora"
     if args.replay_loss == "kl" and args.method != "lora" and any(e[3] for e in examples):
@@ -147,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
                 step += 1
         print(f"epoch {epoch}/{args.epochs}  loss {total / len(examples):.4f}  steps {step}", flush=True)
 
+    if args.gradient_checkpointing:
+        model.config.use_cache = True   # the saved model generates with a cache again
     args.output.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(args.output)
     tokenizer.save_pretrained(args.output)

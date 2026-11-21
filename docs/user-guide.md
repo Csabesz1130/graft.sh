@@ -121,7 +121,18 @@ argv = ["python3", "ask_model.py"]
 | `weights` | Endpoints | Where the model's weights are, for the trainer, when the endpoint id is not a path |
 | `path` | Weights | A folder next to `graft.toml`, an absolute path, or a Hugging Face id |
 | `max_new_tokens`, `device` | Weights | Reply length limit (default 512), and `cuda` or `cpu` (default: a GPU when there is one) |
+| `template_args` | Weights, endpoints | Arguments for the model's chat template, for example `{ enable_thinking = false }`. See below |
 | `argv` | Programs | The command. It gets `{"messages", "tools", "temperature", "seed"}` and prints `{"content", "tool_calls"}` |
+
+Some chat templates take arguments. Qwen3 thinks aloud in a `<think>` block before every reply unless its template gets `enable_thinking = false`; the thinking uses up the reply length and would be trained into the adapter. `template_args` sets such arguments for one model:
+
+```toml
+[models.qwen3]
+path = "Qwen/Qwen3-8B"
+template_args = { enable_thinking = false }
+```
+
+A model loaded in process passes them to its chat template, and the built-in trainer renders training rows with the same arguments, so the adapter learns replies in the form the model is asked for them. An endpoint gets them in the request as `chat_template_kwargs`, the field vLLM and SGLang read; other servers may ignore it. The arguments are part of the model's fingerprint in the certificate: the same weights with another template are another model.
 
 `graft models` shows whether each endpoint answers. graft asks at temperature 0. For a reproducible certificate, serve the model so that temperature 0 is deterministic.
 
@@ -173,9 +184,12 @@ alpha = 32
 batch_size = 8         # rows per optimizer step
 max_length = 8192      # rows longer than this many tokens are skipped
 targets = "all-linear" # the layers a LoRA adapts, or a list of module names
+gradient_checkpointing = false
 ```
 
-It reads the base weights from the target's `weights`, `path` or `model`, in that order.
+It reads the base weights from the target's `weights`, `path` or `model`, in that order, and renders the training rows with the target's `template_args`.
+
+**Memory.** `gradient_checkpointing = true` keeps fewer activations and recomputes them in the backward pass: training takes less memory and each step takes longer. Turn it on when the model barely fits, for example a LoRA on Qwen3-8B on one 24 GB GPU. It works with `method = "full"` and with replay distillation as well.
 
 **What it trains on.** For each training case, one reply that passes the case's verifiers, chosen in this order:
 
@@ -203,7 +217,7 @@ The replies come from the new base itself, so replay can only keep what it alrea
 command = ["python3", "train.py", "--data", "{dataset}", "--base", "{base}", "--out", "{output}"]
 ```
 
-`{dataset}` is a chat fine-tuning file, one row per line: `{"messages": [..., assistant], "tools": [...], "weight": n, "case": id, "rule": id, "origin": "own" | "sampled" | "source" | "replay"}`. A replay row's `rule` is `null`. Only the last assistant message is the target. `weight` says how many times the row should count; a fraction such as 0.5 counts partly (the built-in trainer scales that copy's loss). The command must exit 0 and leave something at `{output}`. `{round}` is also available.
+`{dataset}` is a chat fine-tuning file, one row per line: `{"messages": [..., assistant], "tools": [...], "weight": n, "case": id, "rule": id, "origin": "own" | "sampled" | "source" | "replay"}`. A replay row's `rule` is `null`. Only the last assistant message is the target. `weight` says how many times the row should count; a fraction such as 0.5 counts partly (the built-in trainer scales that copy's loss). The command must exit 0 and leave something at `{output}`. `{round}` is also available, and `{template_args}` is the target's `template_args` as a JSON object (`{}` when it has none).
 
 **Serving the adapter.** A model loaded in process picks the adapter up by itself. An endpoint has to load it:
 

@@ -36,6 +36,26 @@ class RebaseError(Exception):
     pass
 
 
+def trainer_argv(trainer: dict[str, Any], fill: dict[str, str]) -> list[str]:
+    """The trainer's command line: [trainer] command filled in, or the built-in trainer with the [trainer] settings
+    and the target's chat template arguments (fill["template_args"], a JSON object)."""
+    if trainer.get("command"):
+        return [str(part).format(**fill) for part in trainer["command"]]
+    argv = [sys.executable, "-m", "graft.train_hf", "--dataset", fill["dataset"],
+            "--output", fill["output"], "--base", fill["base"]]
+    for key in ("method", "epochs", "lr", "rank", "alpha", "batch_size", "max_length", "seed", "replay_loss"):
+        if key in trainer:
+            argv += [f"--{key.replace('_', '-')}", str(trainer[key])]
+    if "targets" in trainer:   # a list of module names, or "all-linear"
+        wanted = trainer["targets"]
+        argv += ["--targets", ",".join(wanted) if isinstance(wanted, list) else str(wanted)]
+    if trainer.get("gradient_checkpointing"):
+        argv.append("--gradient-checkpointing")
+    if fill.get("template_args", "{}") != "{}":   # trained replies rendered as the runner renders requests
+        argv += ["--template-args", fill["template_args"]]
+    return argv
+
+
 def now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -422,18 +442,10 @@ class Rebase:
     def train(self, dataset: Path, output: Path, number: int) -> None:
         trainer = self.project.trainer
         base = str(self.target_spec.get("weights") or self.target_spec.get("path") or self.target_spec.get("model"))
-        fill = {"dataset": str(dataset), "output": str(output), "base": base, "round": str(number)}
-        if trainer.get("command"):
-            argv = [str(part).format(**fill) for part in trainer["command"]]
-        else:
-            argv = [sys.executable, "-m", "graft.train_hf", "--dataset", fill["dataset"],
-                    "--output", fill["output"], "--base", base]
-            for key in ("method", "epochs", "lr", "rank", "alpha", "batch_size", "max_length", "seed", "replay_loss"):
-                if key in trainer:
-                    argv += [f"--{key.replace('_', '-')}", str(trainer[key])]
-            if "targets" in trainer:   # a list of module names, or "all-linear"
-                wanted = trainer["targets"]
-                argv += ["--targets", ",".join(wanted) if isinstance(wanted, list) else str(wanted)]
+        template = runners.template_args(self.state["target"], self.target_spec) or {}
+        fill = {"dataset": str(dataset), "output": str(output), "base": base, "round": str(number),
+                "template_args": json.dumps(template, sort_keys=True)}
+        argv = trainer_argv(trainer, fill)
         log = output.parent / "train.log"
         name = Path(argv[1]).name if trainer.get("command") and len(argv) > 1 else "graft.train_hf"
         self.say(f"{'training':<18}{name} on {dataset.relative_to(self.project.root)}")

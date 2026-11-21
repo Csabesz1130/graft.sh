@@ -98,10 +98,11 @@ class Replay(Runner):
 class OpenAI(Runner):
     def __init__(self, name: str, endpoint: str, model: str, api_key: str | None = None,
                  params: dict[str, Any] | None = None, timeout: float = 300.0, concurrency: int = 8,
-                 retries: int = 4):
+                 retries: int = 4, template_args: dict[str, Any] | None = None):
         self.name, self.endpoint, self.model = name, endpoint.rstrip("/"), model
         self.api_key, self.params, self.timeout = api_key, params or {}, timeout
         self.concurrency, self.retries = concurrency, retries
+        self.template_args = template_args or {}
 
     def _request(self, path: str, body: dict[str, Any] | None = None) -> Any:
         headers = {"Content-Type": "application/json", "User-Agent": "graft"}
@@ -133,6 +134,8 @@ class OpenAI(Runner):
             body["tools"] = tools
         if seed is not None:
             body["seed"] = seed
+        if self.template_args:   # vLLM and SGLang pass these to the chat template
+            body["chat_template_kwargs"] = {**(body.get("chat_template_kwargs") or {}), **self.template_args}
         answer = self._request("/chat/completions", body)
         try:
             choice = answer["choices"][0]
@@ -144,6 +147,8 @@ class OpenAI(Runner):
 
     def fingerprint(self) -> dict[str, Any]:
         info: dict[str, Any] = {"runner": "openai", "endpoint": self.endpoint, "model": self.model}
+        if self.template_args:
+            info["template_args"] = self.template_args
         try:
             listed = self._request("/models")
             entry = next((m for m in listed.get("data", []) if m.get("id") == self.model), None)
@@ -198,9 +203,10 @@ class HF(Runner):
     """Weights loaded in this process. Needs `pip install 'graft-sh[train]'`."""
 
     def __init__(self, name: str, path: str, adapter: str | None = None, max_new_tokens: int = 512,
-                 device: str | None = None):
+                 device: str | None = None, template_args: dict[str, Any] | None = None):
         self.name, self.path, self.adapter = name, path, adapter
         self.max_new_tokens, self.device = max_new_tokens, device
+        self.template_args = template_args or {}
         self._lock = threading.Lock()
         self._loaded: tuple[Any, Any, Any] | None = None
 
@@ -233,7 +239,8 @@ class HF(Runner):
             if seed is not None:
                 torch.manual_seed(seed)
             prompt = tokenizer.apply_chat_template(hf_messages(messages), tools=tools or None,
-                                                   add_generation_prompt=True, tokenize=False)
+                                                   add_generation_prompt=True, tokenize=False,
+                                                   **self.template_args)
             inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(model.device)
             sampling = {"do_sample": True, "temperature": temperature} if temperature > 0 else {"do_sample": False}
             with torch.no_grad():
@@ -258,6 +265,8 @@ class HF(Runner):
             info["config_sha256"] = hashlib.sha256(config.read_bytes()).hexdigest()
         if self.adapter:
             info["adapter"] = self.adapter
+        if self.template_args:   # another rendering of the same weights answers differently
+            info["template_args"] = self.template_args
         return info
 
     def close(self) -> None:
@@ -281,6 +290,17 @@ def hf_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def template_args(name: str, spec: dict[str, Any]) -> dict[str, Any] | None:
+    """A model's template_args: keyword arguments for its chat template, such as { enable_thinking = false }."""
+    value = spec.get("template_args")
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise RunnerError(f"[models.{name}] template_args must be a table of chat template arguments, "
+                          f"for example {{ enable_thinking = false }}; got {value!r}")
+    return dict(value)
+
+
 def build(name: str, spec: dict[str, Any], root: Path, adapter: str | None = None,
           env: dict[str, str] | None = None) -> Runner:
     """The runner for a [models.<name>] table. With `adapter`, the same model with that adapter applied."""
@@ -302,14 +322,15 @@ def build(name: str, spec: dict[str, Any], root: Path, adapter: str | None = Non
                                   f"the trained adapter under")
             model = spec["adapter_model"]
         return OpenAI(name, spec["endpoint"], model, api_key=key, params=spec.get("params"),
-                      timeout=float(spec.get("timeout", 300)), concurrency=int(spec.get("concurrency", 8)))
+                      timeout=float(spec.get("timeout", 300)), concurrency=int(spec.get("concurrency", 8)),
+                      template_args=template_args(name, spec))
     if kind == "hf":
         if "path" not in spec:
             raise RunnerError(f"[models.{name}] needs path: a local folder or a Hugging Face id")
         local = root / str(spec["path"])       # a folder next to graft.toml, else a Hugging Face id
         return HF(name, str(local if local.exists() else spec["path"]), adapter=adapter,
                   max_new_tokens=int(spec.get("max_new_tokens", 512)),
-                  device=spec.get("device"))
+                  device=spec.get("device"), template_args=template_args(name, spec))
     if kind == "command":
         if adapter:
             raise RunnerError(f"[models.{name}] is a command runner; it cannot load a trained adapter")

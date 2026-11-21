@@ -59,6 +59,15 @@ class OpenAIRunner(unittest.TestCase):
                          ("org/model", 64, 0.0, 7, False))
         self.assertEqual(body["tools"], [{"type": "function"}])
 
+    def test_template_args_are_sent_as_chat_template_kwargs(self):
+        Scripted.queue = [(200, completion({"content": "a"})), (200, completion({"content": "b"}))]
+        self.runner().complete([{"role": "user", "content": "hi"}])
+        self.assertNotIn("chat_template_kwargs", Scripted.seen[0][2], "not sent unless configured")
+        runner = runners.build("m", {"endpoint": self.endpoint, "model": "org/model",
+                                     "template_args": {"enable_thinking": False}}, Path.cwd())
+        runner.complete([{"role": "user", "content": "hi"}])
+        self.assertEqual(Scripted.seen[1][2]["chat_template_kwargs"], {"enable_thinking": False})
+
     def test_retries_server_errors_but_not_client_errors(self):
         Scripted.queue = [(503, {"error": "busy"}), (200, completion({"content": "ok"}))]
         self.assertEqual(self.runner().complete([{"role": "user", "content": "hi"}])["content"], "ok")
@@ -145,6 +154,9 @@ class Others(unittest.TestCase):
                 runners.build("m", spec, root, env={})
         with self.assertRaisesRegex(runners.RunnerError, "adapter_model"):
             runners.build("m", {"endpoint": "http://x/v1", "model": "a"}, root, adapter="/adapters/1")
+        for spec in ({"path": "/weights"}, {"endpoint": "http://x/v1", "model": "a"}):
+            with self.assertRaisesRegex(runners.RunnerError, r"\[models.m\] template_args must be a table"):
+                runners.build("m", {**spec, "template_args": "enable_thinking=false"}, root)
 
 
 if __name__ == "__main__":

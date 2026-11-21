@@ -86,6 +86,28 @@ class Ladder(ExampleCase):
         for kept in ("suite arithmetic new base", "suite arithmetic grafted", "suite arithmetic source"):
             self.assertTrue((self.run_dir() / "evals" / f"{kept}.json").is_file(), kept)
 
+    def test_the_target_template_args_reach_the_trainer(self):
+        (self.root / "record_trainer.py").write_text(
+            "import pathlib, runpy, sys\n"
+            "pathlib.Path('template_args.json').write_text(sys.argv.pop())\n"
+            "runpy.run_path('mock_trainer.py', run_name='__main__')\n")
+        served = 'adapter_model = "new-base-graft"'
+        self.edit(lambda text: text.replace(served, served + "\ntemplate_args = { enable_thinking = false }")
+                  .replace('"mock_trainer.py", "{dataset}", "{output}"',
+                           '"record_trainer.py", "{dataset}", "{output}", "{template_args}"'))
+        code, out, err = self.graft("rebase", "--target", "new-base")
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(json.loads((self.root / "template_args.json").read_text()), {"enable_thinking": False})
+        self.assertEqual(self.cert()["target"]["fingerprint"]["template_args"], {"enable_thinking": False})
+
+    def test_template_args_must_be_a_table(self):
+        self.edit(lambda text: text.replace('adapter_model = "new-base-graft"',
+                                            'adapter_model = "new-base-graft"\ntemplate_args = "no thinking"'))
+        code, out, err = self.graft("rebase", "--target", "new-base")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("[models.new-base] template_args must be a table", err)
+        self.assertNotIn("Traceback", err)
+
     def test_continue_after_a_suite_conflict_trains_again(self):
         self.edit(lambda text: text.replace("max_loss = 0.02", "max_loss = -0.5"))   # a gate nothing can pass
         code, out, _ = self.graft("rebase", "--target", "new-base")
@@ -285,6 +307,25 @@ class Ladder(ExampleCase):
         self.assertIn("no model named 'nope'", err)
         code, _, err = self.graft("rebase", "--target", "prod", "--ladder", "zero-shot,magic")
         self.assertIn("ladder rungs are", err)
+
+
+class TrainerArgv(unittest.TestCase):
+    fill = {"dataset": "d.jsonl", "output": "out", "base": "Qwen/Qwen3-8B", "round": "1", "template_args": "{}"}
+
+    def test_builtin_trainer_gets_checkpointing_and_template_args(self):
+        argv = rebase.trainer_argv({"method": "lora", "gradient_checkpointing": True},
+                                   {**self.fill, "template_args": '{"enable_thinking": false}'})
+        self.assertEqual(argv[1:3], ["-m", "graft.train_hf"])
+        self.assertIn("--gradient-checkpointing", argv)
+        self.assertEqual(argv[argv.index("--template-args") + 1], '{"enable_thinking": false}')
+        plain = rebase.trainer_argv({"method": "lora", "gradient_checkpointing": False}, self.fill)
+        self.assertNotIn("--gradient-checkpointing", plain)
+        self.assertNotIn("--template-args", plain, "only passed when the target sets template_args")
+
+    def test_own_trainer_command_can_read_template_args(self):
+        argv = rebase.trainer_argv({"command": ["t", "{base}", "{template_args}"]},
+                                   {**self.fill, "template_args": '{"enable_thinking": false}'})
+        self.assertEqual(argv, ["t", "Qwen/Qwen3-8B", '{"enable_thinking": false}'])
 
 
 class PromptBlock(unittest.TestCase):
