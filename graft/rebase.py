@@ -582,8 +582,9 @@ class Rebase:
         if not self.last and not awaiting:
             self.check("baseline", self.state["graft"])
         sampler, sampling_graft = self.runner_for(self.state["graft"]), self.state["graft"]
-        # A later round can do worse than an earlier one. Keep the round that passes the most training cases (held-out
-        # cases never choose: they would stop being held out), and fall back to it if the rung ends without passing.
+        # A later round can do worse than an earlier one. Keep the round that passes the most training cases, the
+        # latest of equals (held-out cases never choose: they would stop being held out), and fall back to it if the
+        # rung ends without passing.
         best: tuple[int, dict[str, Any], str] | None = None
         if self.state["graft"].get("kind") == "lora" and self.last:
             best = (self.train_passes(self.last), self.state["graft"], self.state["stages"][-1]["stage"])
@@ -620,7 +621,7 @@ class Rebase:
             self.state["graft"], self.state["round"] = graft, number
             if self.check(f"lora round {number}", graft, extra):
                 return True
-            if best is None or self.train_passes(self.last) > best[0]:
+            if best is None or self.train_passes(self.last) >= best[0]:
                 best = (self.train_passes(self.last), graft, f"lora round {number}")
             sampler, sampling_graft = self.runner_for(graft), graft
         if best is not None and best[1] is not self.state["graft"]:

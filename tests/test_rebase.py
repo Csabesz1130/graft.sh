@@ -212,6 +212,22 @@ class Ladder(ExampleCase):
         self.assertGreater(stages["lora round 1"], stages["lora round 2"])
         self.assertEqual(cert["totals"]["passed"], stages["lora round 1"], "the certificate describes the kept round")
 
+    def test_of_equal_rounds_the_latest_is_kept(self):
+        # the same rules learned in every round: equal on the training cases, so the latest round stays
+        (self.root / "steady_trainer.py").write_text(
+            "import json, sys\nfrom pathlib import Path\n"
+            "rows = [json.loads(l) for l in Path(sys.argv[1]).read_text().splitlines() if l.strip()]\n"
+            "rules = sorted({r['rule'] for r in rows if r.get('rule')} - {'account-closure'})\n"
+            "out = Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)\n"
+            "(out / 'learned.json').write_text(json.dumps({'rules': rules, 'rows': len(rows)}))\n")
+        self.edit(lambda text: text.replace('"mock_trainer.py", "{dataset}", "{output}"',
+                                            '"steady_trainer.py", "{dataset}", "{output}"'))
+        code, out, err = self.graft("rebase", "--target", "new-base", "--ladder", "lora", "--rounds", "2")
+        self.assertEqual(code, 1, out + err)
+        self.assertNotIn("keeping", out, "nothing earlier did better than the last round")
+        state = json.loads(next((self.root / ".graft" / "grafts").glob("*/*/state.json")).read_text())
+        self.assertIn("round-2", state["graft"]["adapter"])
+
     def test_a_project_moved_elsewhere_keeps_its_graft(self):
         self.assertEqual(self.graft("rebase", "--target", "new-base")[0], 0)
         state = json.loads(next((self.root / ".graft" / "grafts").glob("*/*/state.json")).read_text())
