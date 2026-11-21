@@ -157,6 +157,28 @@ class Ladder(ExampleCase):
         self.assertEqual(code, 1)
         self.assertIn("was aborted, so there is no graft to use", err)
 
+    def test_a_worse_later_round_does_not_replace_a_better_one(self):
+        # a trainer that learns every rule but one in round 1 and nothing in round 2
+        (self.root / "flaky_trainer.py").write_text(
+            "import json, sys\nfrom pathlib import Path\n"
+            "rows = [json.loads(l) for l in Path(sys.argv[1]).read_text().splitlines() if l.strip()]\n"
+            "rules = sorted({r['rule'] for r in rows if r.get('rule')} - {'account-closure'})\n"
+            "out = Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)\n"
+            "learned = rules if sys.argv[3] == '1' else []\n"
+            "(out / 'learned.json').write_text(json.dumps({'rules': learned, 'rows': len(rows)}))\n")
+        self.edit(lambda text: text.replace('"mock_trainer.py", "{dataset}", "{output}"',
+                                            '"flaky_trainer.py", "{dataset}", "{output}", "{round}"'))
+        code, out, err = self.graft("rebase", "--target", "new-base", "--ladder", "lora", "--rounds", "2")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("keeping           lora round 1", out)
+        state = json.loads(next((self.root / ".graft" / "grafts").glob("*/*/state.json")).read_text())
+        self.assertIn("round-1", state["graft"]["adapter"], "the conflict keeps the better adapter")
+        cert = self.cert()
+        self.assertIn("round-1", cert["graft"]["adapter"])
+        stages = {s["stage"]: s["passed"] for s in cert["ladder"]}
+        self.assertGreater(stages["lora round 1"], stages["lora round 2"])
+        self.assertEqual(cert["totals"]["passed"], stages["lora round 1"], "the certificate describes the kept round")
+
     def test_a_project_moved_elsewhere_keeps_its_graft(self):
         self.assertEqual(self.graft("rebase", "--target", "new-base")[0], 0)
         state = json.loads(next((self.root / ".graft" / "grafts").glob("*/*/state.json")).read_text())

@@ -147,7 +147,7 @@ The steps, in order:
 1. **Source check.** The genome is checked against the source: the model named by `--source` or `[rebase] source`, or the recorded references when there is none. Cases the source fails are left out.
 2. **`zero-shot`.** The new model is asked as it is. Often a good share of the genome already passes; that share needs no graft at all. If everything passes, the rebase is a fast-forward and ends here.
 3. **`prompt`.** Round 1 states every failing rule in a block appended to the system prompt. Later rounds add worked examples for rules that still fail: up to two more per rule and round, taken from the training cases, failing ones first.
-4. **`lora`.** An adapter is trained and the genome checked against the new model with it. See [Training](#training).
+4. **`lora`.** An adapter is trained and the genome checked against the new model with it. See [Training](#training). A later round can do worse than an earlier one; when the rung ends without passing, the rebase keeps the round that passed the most training cases, and `--continue` goes on from it. Held-out cases never take part in that choice.
 
 A rung is tried for `rounds` rounds (default 3), and the next rung starts where the last one stopped. Every round checks the whole genome again, so fixing one rule cannot quietly break another.
 
