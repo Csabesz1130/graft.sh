@@ -107,12 +107,32 @@ graft show                          # the latest certificate
 
 `graft verify` exits non-zero when a gate fails, so it also works as a regression gate in CI for any model or prompt change.
 
+## Results on real models
+
+graft 0.1.0 was run end to end on Modal GPUs (one 24 GB L4 for the 8B runs) with the built-in trainer: replay with distillation, LoRA on attention and MLP layers, gradient checkpointing.
+
+- **The old model**: Qwen2.5-0.5B-Instruct with a LoRA that graft itself trained on the support-desk genome's recorded replies, standing in for a company's fine-tune.
+- **The genome** (`ab2750f9`): the support-desk rules with 85 cases, 30 held out. 15 of the held-out cases were written by a separate agent that saw only the five rule statements and the case format: no other case and no model output. 27 cases are left out because the old model fails them, so each rebase is held to 58 cases, 18 of them held out.
+
+| New base | Architecture | Outcome | Genome cases | Held out | Arithmetic suite: old / new base / grafted |
+|---|---|---|---|---|---|
+| Qwen3-8B | dense transformer (another lab, another tokenizer) | **passed** | 58/58 | 18/18 (95% lower bound 76.6%, after 6 looks) | 63.3% / 93.3% / 96.7% (p = 0.002 against the old model) |
+| Granite-4.0-H-Tiny (7B) | hybrid Mamba-2 + mixture of experts | conflict | 56/58 | 16/18: two legal cases, one of them blind | not reached |
+
+Forgetting, on GSM8K's first 100 test problems (plain new base against the grafted one, same questions): Granite-4.0-H-Tiny 88 → 89, Qwen3-8B 92 → 93, 3 gained and 2 lost each. These were measured on earlier adapters of the same runs (Granite: its certified adapter for the previous 59-case genome; Qwen3: an adapter that passed 41 of 45 cases), not on the final ones above. On Granite-4.0-H-Tiny, the same settings also passed a 59-case version of the genome outright: 45/45, held out 10/10.
+
+What to keep in mind when reading these numbers:
+- A held-out set of 18 cases supports a modest bound: 76.6% at 95% confidence is what 18 of 18, looked at 6 times, can show.
+- Between runs, people read some held-out failures and added training cases for the same rules (card numbers with leading zeros, legal notices phrased as statements, more normal-priority tickets). graft counts the times its own search consults held-out results, not the times a person does. The 15 blind cases were never used that way.
+- On a 350M-parameter new base (Granite-4.0-H-350M, CPU), the same recipe could not keep the new base's arithmetic: the graft cost 7% to 23% of the suite whatever the settings, and the gate stopped it.
+- Total compute for all of the above, failed attempts included: about $5 to $6 of Modal time.
+
 ## Known limits
 
 This is version 0.1.
 
-- The built-in trainer and the in-process runner are tested end to end on a toy model on CPU. They have not yet been run on a full-size model on GPUs; expect to tune `[trainer]` settings, or plug in the trainer you already use.
-- Training an adapter can cost the new base some of its general skill. A capability suite measures it and the gate stops the rebase. Replay with distillation (`[trainer] replay`) and adapting fewer layers (`targets`) reduce it: on a CPU test rebasing onto Granite-4.0-H-350M, the arithmetic loss fell from 23% to 7% with every rule still holding, but not to the 2% gate. Expect to tune this per model.
+- The built-in trainer and the in-process runner have been run on 7B and 8B models on one 24 GB GPU (see Results on real models) and on a toy model on CPU in the tests. Larger models and multi-GPU training are untested; expect to tune `[trainer]` settings, or plug in the trainer you already use.
+- Training an adapter can cost the new base some of its general skill. A capability suite measures it and the gate stops the rebase. Replay with distillation (`[trainer] replay`) and adapting fewer layers (`targets`) reduce it. On 7B and 8B new bases no loss was measured; on a 350M new base the loss stayed between 7% and 23%.
 - Models loaded in process get tool calls parsed from `<tool_call>` blocks only. For models with another tool format, serve them behind an endpoint that parses it.
 - `graft capture goethe` reads chat-completions turns. Anthropic-format and Responses turns are skipped.
 - A prompt graft is text for your system prompt (`graft show --graft`); graft does not serve it for you.
