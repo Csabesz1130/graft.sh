@@ -3,7 +3,8 @@
 #   scripts/server-test.sh              # unit tests, a clean install, the demo rebase, its alternate endings
 #   scripts/server-test.sh --train      # also installs torch, transformers and peft and runs the trainer tests
 # Everything happens in a temporary folder and virtualenv; nothing is installed system-wide. Exit 0 = all passed.
-# Set GRAFT_TEST_PYTHON to select an interpreter or GRAFT_TORCH_INDEX_URL to install torch from a CPU wheel index.
+# Set GRAFT_TEST_PYTHON to select an interpreter. Without an NVIDIA GPU, --train installs torch from the CPU wheel index;
+# GRAFT_TORCH_INDEX_URL picks another index (empty: the default CUDA build).
 set -uo pipefail
 TRAIN=0
 if [[ "$#" == 1 && "$1" == "--train" ]]; then TRAIN=1
@@ -55,6 +56,12 @@ run "graft --version" "${GRAFT}" --version
 
 if [ "${TRAIN}" = 1 ]; then
   step "training dependencies"
+  # No NVIDIA GPU: the CPU wheels (about 200 MB) instead of the default CUDA build (about 5 GB of wheels this host cannot use).
+  # GRAFT_TORCH_INDEX_URL overrides this; set it empty to install the default build anyway.
+  if [ -z "${GRAFT_TORCH_INDEX_URL+set}" ] && ! command -v nvidia-smi >/dev/null; then
+    GRAFT_TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+  fi
+  echo "torch from ${GRAFT_TORCH_INDEX_URL:-the default index}"
   if [ -n "${GRAFT_TORCH_INDEX_URL:-}" ]; then
     "${VPY}" -m pip install -q --index-url "${GRAFT_TORCH_INDEX_URL}" 'torch>=2.2' || exit 1
   fi

@@ -118,6 +118,7 @@ Carries the genome onto a new base model. It checks the genome against the sourc
 | `--rounds <n>` | Attempts per rung. Default: `[rebase] rounds`, else 3 |
 | `--continue` | Pick up the rebase in progress |
 | `--abort` | Drop the rebase in progress. Nothing it trained or recorded is deleted |
+| `--enforce-all` | Hold the new base to every case, also those the source fails. By default those are left out: a rebase carries over behavior the source has. Default: `[rebase] enforce_all`. Can be turned on with `--continue`, which checks the source again |
 
 One rebase can be in progress at a time. It ends in one of three ways:
 

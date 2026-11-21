@@ -157,6 +157,39 @@ class Ladder(ExampleCase):
         self.assertEqual(code, 1)
         self.assertIn("was aborted, so there is no graft to use", err)
 
+    def test_enforce_all_holds_the_new_base_to_what_the_source_fails(self):
+        new_rule = {"id": "refund-house-code", "messages": [{"role": "user", "content": "Refund $10 for order #77."}],
+                    "reference": {"content": "XYZZY"}, "verify": [{"type": "contains", "value": "XYZZY"}]}
+        with open(self.root / "genome" / "cases" / "refund-limit.jsonl", "a") as out:
+            out.write(json.dumps(new_rule) + "\n")
+        code, out, _ = self.graft("rebase", "--target", "new-base")
+        self.assertEqual(code, 0, out)
+        self.assertIn("1 left out (the source fails them)", out)
+        self.assertEqual(self.cert()["new_behavior"], [])
+        self.assertEqual([e["case"] for e in self.cert()["excluded"]], ["refund-house-code"])
+
+        code, out, _ = self.graft("rebase", "--target", "new-base", "--enforce-all")
+        self.assertEqual(code, 1, "neither model says XYZZY: held to it, the rebase cannot pass")
+        self.assertIn("1 the source fails, enforced as new behavior", out)
+        self.assertIn("refund-limit/refund-house-code", out)
+        runs = sorted((self.root / ".graft" / "grafts" / "new-base").glob("*/certificate.json"))
+        cert = json.loads(runs[-1].read_text())
+        self.assertEqual(cert["excluded"], [])
+        self.assertEqual([e["case"] for e in cert["new_behavior"]], ["refund-house-code"])
+        self.assertIn("1 cases are new behavior", certificate.report(cert))
+        self.assertEqual(self.graft("rebase", "--abort")[0], 0)
+
+    def test_enforce_all_can_be_turned_on_when_continuing(self):
+        new_rule = {"id": "refund-house-code", "messages": [{"role": "user", "content": "Refund $10 for order #77."}],
+                    "reference": {"content": "XYZZY"}, "verify": [{"type": "contains", "value": "XYZZY"}]}
+        with open(self.root / "genome" / "cases" / "refund-limit.jsonl", "a") as out:
+            out.write(json.dumps(new_rule) + "\n")
+        self.assertEqual(self.graft("rebase", "--target", "new-base", "--ladder", "zero-shot")[0], 1)
+        code, out, _ = self.graft("rebase", "--continue", "--enforce-all", "--ladder", "zero-shot")
+        self.assertIn("enforced as new behavior", out, "the source is checked again and its failures kept")
+        state = json.loads(next((self.root / ".graft" / "grafts").glob("*/*/state.json")).read_text())
+        self.assertTrue(state["options"]["enforce_all"])
+
     def test_a_worse_later_round_does_not_replace_a_better_one(self):
         # a trainer that learns every rule but one in round 1 and nothing in round 2
         (self.root / "flaky_trainer.py").write_text(

@@ -87,6 +87,9 @@ def _parser() -> argparse.ArgumentParser:
     rb.add_argument("--rounds", type=int, help="attempts per rung. default 3")
     rb.add_argument("--continue", dest="resume", action="store_true", help="pick up the rebase in progress")
     rb.add_argument("--abort", action="store_true", help="drop the rebase in progress")
+    rb.add_argument("--enforce-all", action="store_true",
+                    help="hold the new base to every case, also those the source fails (new behavior, not carried "
+                         "over). default: [rebase] enforce_all, else only what the source already does")
 
     log = sub.add_parser("log", help="past rebases")
     log.add_argument("--json", action="store_true")
@@ -306,11 +309,16 @@ def _rebase(args: argparse.Namespace) -> int:
             run.state["ladder"] = project.ladder(args.ladder.split(","))
         if args.rounds:
             run.state["options"]["rounds"] = run.options["rounds"] = args.rounds
+        if args.enforce_all and not run.opt("enforce_all", False):
+            run.state["options"]["enforce_all"] = run.options["enforce_all"] = True
+            run.state["excluded"] = None   # the cases the source fails are checked again, and kept this time
     else:
         if not args.target:
             print("graft rebase needs --target <model> (or --continue, or --abort)", file=sys.stderr)
             return 2
-        options = {"rounds": args.rounds} if args.rounds else {}
+        options: dict[str, Any] = {"rounds": args.rounds} if args.rounds else {}
+        if args.enforce_all:
+            options["enforce_all"] = True
         source = args.source or project.rebase.get("source")
         run = rebase.Rebase.start(project, found, args.target, source,
                                   project.ladder(args.ladder.split(",") if args.ladder else None), options,

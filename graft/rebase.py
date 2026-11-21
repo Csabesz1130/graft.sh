@@ -317,15 +317,23 @@ class Rebase:
         if live and any(r.error for r in results.values()):
             bad = next(r for r in results.values() if r.error)
             raise RebaseError(f"the source model {name} could not answer ({bad.problems[0]})")
-        excluded = {r.case: r.problems[0] for r in results.values() if not r.ok and not r.error}
+        failing = {r.case: r.problems[0] for r in results.values() if not r.ok and not r.error}
+        enforce = bool(self.opt("enforce_all", False))
+        # By default a rebase carries over only behavior the source has. With enforce_all, cases the source fails are
+        # new behavior the new base is held to as well; the certificate lists them apart.
+        excluded = {} if enforce else failing
         self.state["excluded"] = excluded
+        self.state["source_failed"] = failing if enforce else {}
         self.state["source_fingerprint"] = runner.fingerprint()
         self.state["source_checked"] = sum(not r.error for r in results.values())
         self.save()
         kept = len(cases) - len(excluded)
         label = name or "references"
-        self.say(f"{'source':<18}{kept}/{len(cases)} cases hold on {label}"
-                 + (f"   {len(excluded)} left out (the source fails them)" if excluded else ""))
+        note = ""
+        if failing:
+            note = (f"   {len(failing)} the source fails, enforced as new behavior (enforce_all)" if enforce
+                    else f"   {len(failing)} left out (the source fails them)")
+        self.say(f"{'source':<18}{len(cases) - len(failing)}/{len(cases)} cases hold on {label}" + note)
         if not kept:
             raise RebaseError("the source fails every case, so there is no behavior to carry over; "
                               "`graft check` shows why")

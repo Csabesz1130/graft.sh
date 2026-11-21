@@ -47,6 +47,8 @@ def build(state: dict[str, Any], genome: Genome, results: dict[str, CaseResult],
         "ladder": state.get("stages", []),
         "excluded": [{"case": case, "rule": genome.case(case).rule, "reason": reason}
                      for case, reason in sorted(excluded.items())],
+        "new_behavior": [{"case": case, "rule": genome.case(case).rule, "source_failed": reason}
+                         for case, reason in sorted((state.get("source_failed") or {}).items())],
         "failures": [{"case": r.case, "rule": r.rule, "split": r.split, "problems": r.problems}
                      for r in kept.values() if not r.ok],
         "suites": suites,
@@ -133,6 +135,10 @@ def report(cert: dict[str, Any]) -> str:
     if totals["weak"]:
         lines.append(f"- {totals['weak']} cases rest on a similarity match alone (`similar`). They show the "
                      f"reply resembles the recorded one, not that it is right. Write a real verifier for them.")
+    if cert.get("new_behavior"):
+        lines.append(f"- {len(cert['new_behavior'])} cases are new behavior: the source fails them, and the rebase "
+                     f"held the new base to them anyway (enforce_all). For those, this is not a rebase of existing "
+                     f"behavior but a change to it.")
     lines.append("- It says nothing about requests unlike the genome's cases. A rule is only as well "
                  "protected as its cases are varied.")
     if cert["ladder"]:
