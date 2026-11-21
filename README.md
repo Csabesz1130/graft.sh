@@ -112,6 +112,7 @@ graft show                          # the latest certificate
 This is version 0.1.
 
 - The built-in trainer and the in-process runner are tested end to end on a toy model on CPU. They have not yet been run on a full-size model on GPUs; expect to tune `[trainer]` settings, or plug in the trainer you already use.
+- Training an adapter can cost the new base some of its general skill. A capability suite measures it and the gate stops the rebase. Replay with distillation (`[trainer] replay`) and adapting fewer layers (`targets`) reduce it: on a CPU test rebasing onto Granite-4.0-H-350M, the arithmetic loss fell from 23% to 7% with every rule still holding, but not to the 2% gate. Expect to tune this per model.
 - Models loaded in process get tool calls parsed from `<tool_call>` blocks only. For models with another tool format, serve them behind an endpoint that parses it.
 - `graft capture goethe` reads chat-completions turns. Anthropic-format and Responses turns are skipped.
 - A prompt graft is text for your system prompt (`graft show --graft`); graft does not serve it for you.

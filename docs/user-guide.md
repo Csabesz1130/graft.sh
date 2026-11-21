@@ -172,6 +172,7 @@ rank = 16
 alpha = 32
 batch_size = 8         # rows per optimizer step
 max_length = 8192      # rows longer than this many tokens are skipped
+targets = "all-linear" # the layers a LoRA adapts, or a list of module names
 ```
 
 It reads the base weights from the target's `weights`, `path` or `model`, in that order.
@@ -184,6 +185,17 @@ It reads the base weights from the target's `weights`, `path` or `model`, in tha
 
 Every row of a rule that still fails is weighted up, more in later rounds: its passing replies as well as the corrected ones. Weighting only the corrected replies would tip a boundary rule (refunds up to $500 issued, above that escalated) towards whichever side failed last, and the next round would fail the other side. Training requests do not contain the prompt graft, so what the prompt achieved is learned into the adapter. The certificate reports how many rows came from each origin.
 
+**Keep what the new base already does: replay.** An adapter trained only on the genome learns its rules everywhere, not just where they apply: a support rule against legal advice can turn into refusing arithmetic. A capability suite catches that (the graft costs more than `max_loss`), and replay prevents it. List requests outside the genome, and the new base's own replies to them, asked once at temperature 0, are trained on alongside the genome:
+
+```toml
+[trainer]
+replay = "genome/replay.jsonl"   # or a list of files; one {"messages": [...], "tools": [...]} per line
+replay_weight = 1                # how many times each replayed row counts. Default 1
+replay_loss = "kl"               # "kl" (default) or "ce"; see below
+```
+
+The replies come from the new base itself, so replay can only keep what it already does; it cannot teach a right answer. The built-in trainer distils replay rows (`replay_loss = "kl"`): on each reply it holds the adapter to the base model's whole next-token distribution, read from the same weights with the adapter switched off, rather than to the one reply it sampled. That keeps how likely each way of answering was, not just one answer. `"ce"` trains on the reply's tokens like any other row; a full fine-tune always does. Use requests like the ones your users send that the genome does not cover, and cover each capability across its range: replay protects only what it shows. If the new base answers easy questions in a line but works hard ones out step by step, replay of easy questions alone teaches the adapter to answer everything in a line, and the hard ones go wrong. On a hybrid model (state-space layers with a few attention layers), adapting only the attention and MLP layers (`targets`) also leaves more of the base intact. A replay request that repeats a genome case or a suite case is refused: a suite the adapter trained on would no longer measure what the graft cost. The certificate counts the replayed rows.
+
 **Your own trainer.** Any command that reads the dataset and writes an adapter folder works:
 
 ```toml
@@ -191,7 +203,7 @@ Every row of a rule that still fails is weighted up, more in later rounds: its p
 command = ["python3", "train.py", "--data", "{dataset}", "--base", "{base}", "--out", "{output}"]
 ```
 
-`{dataset}` is a chat fine-tuning file, one row per line: `{"messages": [..., assistant], "tools": [...], "weight": n, "case": id, "rule": id, "origin": "own" | "sampled" | "source"}`. Only the last assistant message is the target. `weight` says how many times the row should count. The command must exit 0 and leave something at `{output}`. `{round}` is also available.
+`{dataset}` is a chat fine-tuning file, one row per line: `{"messages": [..., assistant], "tools": [...], "weight": n, "case": id, "rule": id, "origin": "own" | "sampled" | "source" | "replay"}`. A replay row's `rule` is `null`. Only the last assistant message is the target. `weight` says how many times the row should count; a fraction such as 0.5 counts partly (the built-in trainer scales that copy's loss). The command must exit 0 and leave something at `{output}`. `{round}` is also available.
 
 **Serving the adapter.** A model loaded in process picks the adapter up by itself. An endpoint has to load it:
 
@@ -287,6 +299,8 @@ max_loss = 0.02
 **The prompt rung does not help.** Read the block it built with `graft show --graft`. If a rule's statement would not make sense to a person reading it cold, rewrite the statement. Rules about the order of actions across several turns usually need the `lora` rung.
 
 **A rule passes in training cases but fails held-out ones.** The cases are too alike or too few, and the graft learned the cases, not the rule. Add cases that differ in kind, then `graft rebase --continue`.
+
+**Every rule holds, but a suite gate fails (`the graft costs ... above max_loss`).** The adapter learned the genome too broadly. Compare `evals/suite <name> new base.json` with `evals/suite <name> grafted.json` in the run folder to see which answers changed: a refusal or the house tone where a plain answer belongs means the rules leaked. Add `[trainer] replay` (see [Training](#training)), then `graft rebase --continue`.
 
 **Results change between runs.** Something is not deterministic: the serving engine at temperature 0, or a command verifier. Fix that first; a certificate is only worth what its reproducibility is.
 

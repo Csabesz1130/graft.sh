@@ -23,7 +23,7 @@ from typing import Any
 from graft import certificate, evaluate, runners, verifiers
 from graft.config import Project
 from graft.evaluate import CaseResult
-from graft.genome import Case, Genome, Unit, load_suite, tree_digest
+from graft.genome import Case, Genome, Unit, canonical, digest, load_suite, tree_digest
 
 HEAD = "REBASE_HEAD"
 PASSED, CONFLICT, PAUSED = 0, 1, 3
@@ -215,6 +215,15 @@ class Rebase:
                 raise RebaseError(str(err)) from err
         return self._adapted[adapter]
 
+    def keep(self, stage: str, results: dict[str, CaseResult]) -> None:
+        """Write a step's replies to evals/, for reading later; nothing steers by them."""
+        folder = self.dir / "evals"
+        folder.mkdir(exist_ok=True)
+        (folder / f"{stage}.json").write_text(
+            json.dumps({"stage": stage, "genome": self.genome.id, "graft": self.state["graft"],
+                        "results": [r.to_json() for r in results.values()]}, ensure_ascii=False) + "\n",
+            encoding="utf-8")
+
     def record(self, stage: str, results: dict[str, CaseResult], extra: dict[str, Any] | None = None) -> bool:
         errors = [r for r in results.values() if r.error]
         if errors:
@@ -300,7 +309,17 @@ class Rebase:
         ladder = state["ladder"]
         rung = state["rung"] if state["rung"] in ladder else ladder[0]
         if continuing and not was_paused and self.check("recheck", state["graft"]):
-            return self.finish()
+            if not state.get("suite_conflict"):
+                return self.finish()
+            # The genome held, but the graft cost too much on a suite. Check the suites as they are now; if
+            # they still fail, carry on climbing: another lora round, trained with the current [trainer].
+            suites = self.suites()
+            if all(s["ok"] for s in suites):
+                return self.finish(suites)
+            if rung != "lora":
+                if rung == ladder[-1]:
+                    return self.conflict(suites)
+                rung, continuing = ladder[ladder.index(rung) + 1], False
         while True:
             if continuing:
                 start = state["round"] if was_paused else state["round"] + 1
@@ -409,9 +428,12 @@ class Rebase:
         else:
             argv = [sys.executable, "-m", "graft.train_hf", "--dataset", fill["dataset"],
                     "--output", fill["output"], "--base", base]
-            for key in ("method", "epochs", "lr", "rank", "alpha", "batch_size", "max_length", "seed"):
+            for key in ("method", "epochs", "lr", "rank", "alpha", "batch_size", "max_length", "seed", "replay_loss"):
                 if key in trainer:
                     argv += [f"--{key.replace('_', '-')}", str(trainer[key])]
+            if "targets" in trainer:   # a list of module names, or "all-linear"
+                wanted = trainer["targets"]
+                argv += ["--targets", ",".join(wanted) if isinstance(wanted, list) else str(wanted)]
         log = output.parent / "train.log"
         name = Path(argv[1]).name if trainer.get("command") and len(argv) > 1 else "graft.train_hf"
         self.say(f"{'training':<18}{name} on {dataset.relative_to(self.project.root)}")
@@ -446,6 +468,76 @@ class Rebase:
                               f"{(done.stderr or done.stdout).strip()[-300:]}")
         return True
 
+    def replay_requests(self) -> list[dict[str, Any]]:
+        """The requests of [trainer] replay: files of {"messages", "tools"} lines, one request each.
+
+        They must not repeat a genome case or a suite case: replay keeps the new base's own behavior on
+        other requests, and a suite that the adapter trained on would no longer measure what it lost.
+        """
+        files = self.project.trainer.get("replay") or []
+        if isinstance(files, str):
+            files = [files]
+        requests = []
+        for name in files:
+            path = self.project.root / str(name)
+            if not path.is_file():
+                raise RebaseError(f"[trainer] replay: no file at {path}")
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                    messages = row["messages"]
+                except (json.JSONDecodeError, KeyError, TypeError) as err:
+                    raise RebaseError(f"{path}:{number}: a replay line is {{\"messages\": [...]}} ({err})") from None
+                if messages and messages[-1].get("role") == "assistant":
+                    messages = messages[:-1]   # a recorded reply is ignored: the new base answers for itself
+                requests.append({"messages": messages, "tools": row.get("tools") or [],
+                                 "where": f"{path.name}:{number}"})
+        if not requests:
+            return []
+        taken: dict[str, str] = {}
+        for case in self.genome.cases:
+            for unit in case.units:
+                taken[canonical(unit.messages)] = f"genome case {case.id}"
+        for name, spec in self.project.suites.items():
+            for case in load_suite(self.project.root / str(spec["path"])):
+                for unit in case.units:
+                    taken[canonical(unit.messages)] = f"suite {name} case {case.id}"
+        clashes = [f"{r['where']} repeats {taken[canonical(r['messages'])]}" for r in requests
+                   if canonical(r["messages"]) in taken]
+        if clashes:
+            raise RebaseError("[trainer] replay must not repeat a genome or suite request:\n  " + "\n  ".join(clashes))
+        return requests
+
+    def replay_rows(self) -> list[dict[str, Any]]:
+        """Rows of the new base's own replies, at temperature 0, to the replay requests. Asked once per run."""
+        requests = self.replay_requests()
+        if not requests:
+            return []
+        weight = float(self.project.trainer.get("replay_weight", 1))
+        key = digest([[r["messages"], r["tools"]] for r in requests] + [weight])[:12]
+        cache = self.dir / "lora" / f"replay-{key}.jsonl"   # a changed replay file is asked again
+        if cache.is_file():
+            return [json.loads(line) for line in cache.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.say(f"{'replay':<18}asking {self.state['target']} for its own replies to {len(requests)} requests")
+
+        def row(index: int, request: dict[str, Any]) -> dict[str, Any] | None:
+            try:
+                reply = self.target.complete(request["messages"], request["tools"] or None, temperature=0.0)
+            except runners.RunnerError:
+                return None
+            if not verifiers.text_of(reply).strip() and not verifiers.calls_of(reply):
+                return None
+            return {"messages": [*request["messages"], assistant_message(reply)], "tools": request["tools"],
+                    "weight": weight, "case": f"replay-{index}", "rule": None, "origin": "replay"}
+
+        with ThreadPoolExecutor(max_workers=max(1, self.target.concurrency)) as pool:
+            rows = [r for r in pool.map(lambda job: row(*job), enumerate(requests, 1)) if r is not None]
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+        return rows
+
     def rung_lora(self, start: int, awaiting: bool) -> bool | int:
         if not self.project.trainer and not awaiting:
             raise RebaseError("the lora rung needs a [trainer] table in graft.toml (docs/user-guide.md#training)")
@@ -462,10 +554,13 @@ class Rebase:
                 if not rows:
                     raise RebaseError("no training case has a reply to learn from: record references, "
                                       "or lower [genome] holdout so more cases can be used")
+                rows += self.replay_rows()
                 dataset = folder / "dataset.jsonl"
                 dataset.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
                 extra = {"trained_on": {origin: sum(r["origin"] == origin for r in rows)
                                         for origin in ("own", "sampled", "source")}}
+                if any(r["origin"] == "replay" for r in rows):
+                    extra["trained_on"]["replay"] = sum(r["origin"] == "replay" for r in rows)
                 self.train(dataset, adapter, number)
                 if not self.serve(adapter):
                     self.state.update(status="paused", round=number, pending=extra)
@@ -497,6 +592,8 @@ class Rebase:
                 cases, self.runner_for(graft), graft, self.project.root, self.tick(f"suite {name}", len(cases)))
             if any(r.error for r in grafted.values()) or any(r.error for r in raw.values()):
                 raise RebaseError(f"suite {name}: requests to {self.state['target']} failed")
+            self.keep(f"suite {name} new base", raw)
+            self.keep(f"suite {name} grafted", grafted)
             share = lambda results: sum(r.ok for r in results.values()) / max(1, len(results))  # noqa: E731
             report: dict[str, Any] = {"suite": name, "cases": len(cases), "base": round(share(raw), 4),
                                       "grafted": round(share(grafted), 4), "ok": True}
@@ -505,6 +602,7 @@ class Rebase:
                 source = runners.build(self.state["source"], self.project.model(self.state["source"]),
                                        self.project.root)
                 old = evaluate.evaluate(cases, source, None, self.project.root, self.tick(f"suite {name}", len(cases)))
+                self.keep(f"suite {name} source", old)
                 versus = evaluate.compare(old, grafted)
                 report.update(source=round(versus["old"], 4), gain=round(versus["new"] - versus["old"], 4),
                               wins=versus["wins"], losses=versus["losses"], p_value=versus["p_value"])
@@ -538,11 +636,12 @@ class Rebase:
         self.save()
         return path
 
-    def finish(self) -> int:
+    def finish(self, suites: list[dict[str, Any]] | None = None) -> int:
         state = self.state
-        suites = self.suites()
+        suites = self.suites() if suites is None else suites
         if not all(s["ok"] for s in suites):
             return self.conflict(suites)
+        state.pop("suite_conflict", None)
         kind = state["graft"].get("kind")
         state["status"], state["outcome"] = "passed", "fast-forward" if kind == "none" else kind
         path = self.close(True, suites)
@@ -557,8 +656,9 @@ class Rebase:
     def conflict(self, suites: list[dict[str, Any]] | None = None) -> int:
         state = self.state
         state["status"], state["outcome"] = "conflict", "conflict"
-        path = self.close(False, suites if suites is not None else [])
         failing = [r for r in self.last.values() if not r.ok and r.case not in self.excluded]
+        state["suite_conflict"] = not failing and bool(suites)
+        path = self.close(False, suites if suites is not None else [])
         if failing:
             self.say(f"\nCONFLICT: {len(failing)} cases still fail on {state['target']} after the "
                      f"{state['rung']} rung.")
@@ -567,7 +667,11 @@ class Rebase:
             if len(failing) > 10:
                 self.say(f"  ... and {len(failing) - 10} more in {path.relative_to(self.project.root)}")
         else:
-            self.say("\nCONFLICT: every rule holds, but a capability suite gate fails (above).")
+            self.say("\nCONFLICT: every rule holds, but a capability suite gate fails (above): the graft costs the "
+                     "new base too much.\nCompare the suite's replies in evals/, add [trainer] replay "
+                     "(docs/user-guide.md#training), then `graft rebase --continue` trains again; "
+                     "or `graft rebase --abort`.")
+            return CONFLICT
         self.say("\nChange the genome, the ladder or the trainer, then `graft rebase --continue`; "
                  "or `graft rebase --abort`.")
         return CONFLICT

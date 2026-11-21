@@ -141,6 +141,7 @@ def report(cert: dict[str, Any]) -> str:
         for stage in cert["ladder"]:
             rows = stage.get("trained_on")
             trained = (f"{rows['own']} own replies, {rows['sampled']} sampled, {rows['source']} from the source"
+                       + (f", {rows['replay']} replayed" if rows.get("replay") else "")
                        if rows else "")
             lines.append(f"| {stage['stage']} | {_share(stage['passed'], stage['total'])} | "
                          f"{stage['rules_ok']} of {stage['rules']} | {trained} |")

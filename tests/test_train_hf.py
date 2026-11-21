@@ -75,6 +75,28 @@ class Trainer(unittest.TestCase):
         self.assertLess(losses[-1], losses[0] - 0.1, "the loss falls")
         self.assertNotEqual(self.answers(output), self.answers(None), "the adapter changes what the model says")
 
+    def test_replay_rows_are_distilled_from_the_base(self):
+        rows = [{"messages": [{"role": "user", "content": q}, {"role": "assistant", "content": a}], "tools": [],
+                 "weight": 1, "case": f"replay-{i}", "rule": None, "origin": "replay"}
+                for i, (q, a) in enumerate(FACTS.items())]
+        dataset = self.root / "replay.jsonl"
+        dataset.write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+        def first_loss(*extra):
+            done = subprocess.run([sys.executable, "-m", "graft.train_hf", "--dataset", str(dataset), "--base",
+                                   str(self.root / "base"), "--output", str(self.root / ("kd" + "".join(extra))),
+                                   "--epochs", "1", "--batch-size", "1", "--lr", "0.0", *extra],
+                                  capture_output=True, text=True, check=False)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            line = next(line for line in done.stdout.splitlines() if line.startswith("epoch"))
+            return float(line.split("loss ")[1].split()[0])
+
+        # A new adapter is zero, so the adapted model is the base: kl only sees the student's dropout. ce on the
+        # reply's tokens pulls towards one reply instead, and is far larger.
+        kl, ce = first_loss(), first_loss("--replay-loss", "ce")
+        self.assertGreater(ce, 0.1)
+        self.assertLess(kl, ce / 20, "kl against the base starts near zero")
+
     def test_only_the_final_assistant_message_is_learned(self):
         from transformers import AutoTokenizer
 
@@ -123,3 +145,21 @@ class RealRebase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Weights(unittest.TestCase):
+    """How a row's weight becomes training copies. Needs no torch."""
+
+    def test_whole_and_fractional_weights(self):
+        from graft.train_hf import copies
+        self.assertEqual(copies(1), [1.0])
+        self.assertEqual(copies(2), [1.0, 1.0], "a whole weight is unchanged: that many full copies")
+        self.assertEqual(copies(2.5), [1.0, 1.0, 0.5])
+        self.assertEqual(copies(0.5), [0.5], "a weight below one is not rounded up to a full copy")
+        self.assertEqual(copies(0), [1.0])
+
+    def test_targets(self):
+        from graft.train_hf import targets
+        self.assertEqual(targets("all-linear"), "all-linear")
+        self.assertEqual(targets(""), "all-linear")
+        self.assertEqual(targets("q_proj, k_proj,v_proj"), ["q_proj", "k_proj", "v_proj"])

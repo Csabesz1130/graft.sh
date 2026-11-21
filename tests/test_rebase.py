@@ -66,6 +66,51 @@ class Ladder(ExampleCase):
         code, out, _ = self.graft("log")
         self.assertIn("passed    lora", out)
 
+    def test_replay_trains_on_the_new_base_own_replies(self):
+        replay = self.root / "genome" / "replay.jsonl"
+        replay.write_text("".join(json.dumps({"messages": [{"role": "user", "content": q}]}) + "\n" for q in
+                                  ("What is 31 * 7? Reply with the number only.", "Name a colour of the sky.")))
+        self.edit(lambda text: text.replace("[trainer]", '[trainer]\nreplay = "genome/replay.jsonl"'))
+        code, out, err = self.graft("rebase", "--target", "new-base")
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("own replies to 2 requests", out)
+        rows = [json.loads(line) for line in
+                (self.run_dir() / "lora" / "round-1" / "dataset.jsonl").read_text().splitlines()]
+        replayed = [r for r in rows if r["origin"] == "replay"]
+        self.assertEqual(len(replayed), 2)
+        self.assertTrue(all(r["rule"] is None and r["weight"] == 1 for r in replayed))
+        self.assertIn("217", replayed[0]["messages"][-1]["content"], "the new base's own answer, not a label")
+        cert = self.cert()
+        self.assertEqual(cert["ladder"][-1]["trained_on"]["replay"], 2)
+        self.assertIn("2 replayed", certificate.report(cert))
+        for kept in ("suite arithmetic new base", "suite arithmetic grafted", "suite arithmetic source"):
+            self.assertTrue((self.run_dir() / "evals" / f"{kept}.json").is_file(), kept)
+
+    def test_continue_after_a_suite_conflict_trains_again(self):
+        self.edit(lambda text: text.replace("max_loss = 0.02", "max_loss = -0.5"))   # a gate nothing can pass
+        code, out, _ = self.graft("rebase", "--target", "new-base")
+        self.assertEqual(code, 1)
+        self.assertIn("capability suite gate fails", out)
+        self.assertIn("add [trainer] replay", out)
+        code, out, err = self.graft("rebase", "--continue")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("lora round 2", out, "a suite conflict is not a dead end: --continue trains again")
+        self.assertTrue((self.run_dir() / "lora" / "round-2" / "adapter").exists())
+        self.edit(lambda text: text.replace("max_loss = -0.5", "max_loss = 0.02"))
+        code, out, err = self.graft("rebase", "--continue")
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("lora round 3", out, "once the suites pass, nothing is trained again")
+        self.assertIn("as a trained adapter", out)
+
+    def test_replay_must_not_repeat_a_suite_request(self):
+        suite = (self.root / "genome" / "suites" / "arithmetic.jsonl").read_text().splitlines()[0]
+        (self.root / "genome" / "replay.jsonl").write_text(suite + "\n")
+        self.edit(lambda text: text.replace("[trainer]", '[trainer]\nreplay = "genome/replay.jsonl"'))
+        code, out, err = self.graft("rebase", "--target", "new-base")
+        self.assertEqual(code, 1)
+        self.assertIn("must not repeat a genome or suite request", err)
+        self.assertIn("suite arithmetic case", err)
+
     def test_graft_means_the_latest_passed_run(self):
         self.assertEqual(self.graft("rebase", "--target", "new-base")[0], 0)
         self.assertEqual(self.graft("rebase", "--target", "new-base", "--ladder", "zero-shot")[0], 1)
