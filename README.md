@@ -132,6 +132,18 @@ The first command covers the core suite, a full demo rebase and its alternate en
 
 The reported Hetzner run passed all 68 tests in training mode with CUDA unavailable. Its demo certificate recorded 52/52 passing cases and five rules holding. The baseline run skipped the four trainer tests as expected. These counts identify that run and can grow as cases are added.
 
+## Run on a GPU with Modal
+
+`scripts/modal_graft.py` runs any command from this checkout on a [Modal](https://modal.com) GPU, billed per second, with model weights cached on a volume between runs:
+
+```bash
+pip install modal && modal token new                      # once
+modal run scripts/modal_graft.py                          # the test suite on an L4
+modal volume put graft-runs ./my-project /my-project      # a project folder, model paths relative to it
+GRAFT_GPU=A100-80GB modal run --detach scripts/modal_graft.py --workdir /runs/my-project --cmd "graft rebase --target new-base"
+modal volume get graft-runs /my-project/.graft ./results  # the run's evals, adapters and certificate
+```
+
 ## Documentation
 
 - **[User guide](docs/user-guide.md):** build a genome, set up models, run a rebase, train, read the certificate.
