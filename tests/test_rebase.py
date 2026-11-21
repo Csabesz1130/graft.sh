@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import unittest
 from pathlib import Path
@@ -266,6 +267,35 @@ class Ladder(ExampleCase):
             self.assertEqual(cli.main(["rebase", "--target", "new-base"]), 0)
         self.assertIn("train", events)
         self.assertIn("close", events[:events.index("train")], "the trainer gets the memory this process held")
+
+    def test_never_two_copies_of_the_target_at_once(self):
+        """Every use of the target goes through runner_for, which frees the other copy: count what is loaded."""
+        from unittest import mock
+
+        from graft import cli, runners
+        loaded, peak = set(), [0]
+        complete, close = runners.OpenAI.complete, runners.Runner.close
+
+        def record_complete(this, *args, **kwargs):
+            if this.model in ("open/new-base-30b", "new-base-graft"):
+                loaded.add(id(this))
+                peak[0] = max(peak[0], len(loaded))
+            return complete(this, *args, **kwargs)
+
+        def record_close(this):
+            loaded.discard(id(this))
+            return close(this)
+
+        replay = self.root / "genome" / "replay.jsonl"
+        replay.write_text(json.dumps({"messages": [{"role": "user", "content": "Name a colour of the sky."}]}) + "\n")
+        self.edit(lambda text: text.replace("[trainer]", '[trainer]\nreplay = "genome/replay.jsonl"'))
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(self.root)
+        with mock.patch.object(runners.OpenAI, "complete", record_complete), \
+                mock.patch.object(runners.Runner, "close", record_close):
+            self.assertEqual(cli.main(["rebase", "--target", "new-base"]), 0)
+        self.assertEqual(peak[0], 1, "the new base as it is and with an adapter were in use at the same time")
 
     def test_a_changed_adapter_is_caught(self):
         self.assertEqual(self.graft("rebase", "--target", "new-base")[0], 0)

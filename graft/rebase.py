@@ -559,10 +559,11 @@ class Rebase:
         if cache.is_file():
             return [json.loads(line) for line in cache.read_text(encoding="utf-8").splitlines() if line.strip()]
         self.say(f"{'replay':<18}asking {self.state['target']} for its own replies to {len(requests)} requests")
+        base = self.runner_for({"kind": "none"})   # the new base as it is; any adapter copy is freed first
 
         def row(index: int, request: dict[str, Any]) -> dict[str, Any] | None:
             try:
-                reply = self.target.complete(request["messages"], request["tools"] or None, temperature=0.0)
+                reply = base.complete(request["messages"], request["tools"] or None, temperature=0.0)
             except runners.RunnerError:
                 return None
             if not verifiers.text_of(reply).strip() and not verifiers.calls_of(reply):
@@ -570,7 +571,7 @@ class Rebase:
             return {"messages": [*request["messages"], assistant_message(reply)], "tools": request["tools"],
                     "weight": weight, "case": f"replay-{index}", "rule": None, "origin": "replay"}
 
-        with ThreadPoolExecutor(max_workers=max(1, self.target.concurrency)) as pool:
+        with ThreadPoolExecutor(max_workers=max(1, base.concurrency)) as pool:
             rows = [r for r in pool.map(lambda job: row(*job), enumerate(requests, 1)) if r is not None]
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
@@ -640,7 +641,9 @@ class Rebase:
         graft = self.state["graft"]
         for name, spec in self.project.suites.items():
             cases = load_suite(self.project.root / str(spec["path"]))
-            raw = evaluate.evaluate(cases, self.target, None, self.project.root, self.tick(f"suite {name}", len(cases)))
+            # through runner_for, so the new base as it is and with the graft are never both loaded
+            raw = evaluate.evaluate(cases, self.runner_for({"kind": "none"}), None, self.project.root,
+                                    self.tick(f"suite {name}", len(cases)))
             grafted = raw if graft.get("kind") == "none" else evaluate.evaluate(
                 cases, self.runner_for(graft), graft, self.project.root, self.tick(f"suite {name}", len(cases)))
             if any(r.error for r in grafted.values()) or any(r.error for r in raw.values()):
