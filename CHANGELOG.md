@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Added `graft export` for portable bundles and serving manifests for vLLM and Goethe.
+
 ## 0.1.0
 
 First version.

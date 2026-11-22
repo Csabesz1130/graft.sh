@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from graft import __version__, capture, certificate, config, evaluate, genome, rebase, runners, verifiers
+from graft import __version__, capture, certificate, config, evaluate, export, genome, rebase, runners, verifiers
 from graft.evaluate import CaseResult
 
 PROG = "graft"
@@ -99,6 +99,12 @@ def _parser() -> argparse.ArgumentParser:
     show.add_argument("--json", action="store_true")
     show.add_argument("--graft", action="store_true",
                       help="print the graft itself: the system prompt block, or the adapter path")
+
+    exp = sub.add_parser("export", help="bundle a passed rebase for serving")
+    exp.add_argument("run", nargs="?", help="a target or target/run; default: latest")
+    exp.add_argument("--out", required=True, type=Path, help="new output zip file")
+    exp.add_argument("--format", choices=["portable", "vllm", "goethe"], default="portable")
+    exp.add_argument("--base-model", help="model id or local path for the serving engine")
 
     models = sub.add_parser("models", help="the models in graft.toml, and whether each answers")
     models.add_argument("--json", action="store_true")
@@ -383,6 +389,15 @@ def _show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _export(args: argparse.Namespace) -> int:
+    try:
+        export.bundle(config.load(), args.run, args.out, args.format, args.base_model)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as err:
+        raise rebase.RebaseError(f"could not export: {err}") from err
+    print(args.out)
+    return 0
+
+
 def _models(args: argparse.Namespace) -> int:
     project = config.load()
     rows = []
@@ -414,7 +429,7 @@ def _models(args: argparse.Namespace) -> int:
 
 
 COMMANDS = {"init": _init, "status": _status, "rule": _rule, "capture": _capture, "check": _check,
-            "verify": _verify, "rebase": _rebase, "log": _log, "show": _show, "models": _models}
+            "verify": _verify, "rebase": _rebase, "log": _log, "show": _show, "models": _models, "export": _export}
 
 
 def main(argv: Sequence[str] | None = None) -> int:

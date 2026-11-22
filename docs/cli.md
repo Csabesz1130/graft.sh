@@ -142,3 +142,11 @@ Prints a rebase's certificate as a readable report and checks its digest. Exits 
 | `--graft` | Print the graft instead: the system prompt block of a prompt graft, or the adapter path of a trained one. Without a run, the latest rebase that was not aborted; an aborted run named exactly exits 1 |
 
 A run's files are in `.graft/grafts/<target>/<run>/`: `certificate.json`, `REPORT.md`, `graft.json`, the evaluation of every step under `evals/`, and each training round's dataset, log and adapter under `lora/`.
+
+## Export a verified run
+
+`graft export [target/run] --out graft.zip` writes a portable certificate, manifest and any required adapter or system prompt. Extract the archive before serving. A certified prompt can contain worked examples from captures and the certificate includes model fingerprints. Review the bundle before sharing it.
+
+For vLLM use `graft export --format vllm --base-model MODEL --out serving.zip`. From the extracted directory, run the argument list in `manifest.json` and use its `request_model` in an OpenAI-compatible client. If the bundle includes `system.txt`, append that text to your client’s system message. A LoRA export requires PEFT safetensors compatible with your base model. The portable format also supports custom trainer artifacts.
+
+For a prompt or fast-forward run on Goethe, pass `--format goethe --base-model MODEL`. The manifest records the `goethe load` arguments and request model. Send requests to the operator's configured OpenAI-compatible endpoint, including the exported system text when present.

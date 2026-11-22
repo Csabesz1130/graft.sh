@@ -44,6 +44,8 @@ certificate  .graft/grafts/new-base/0001-0d148ae2/certificate.json
 
 `graft show` prints the certificate. [The example's README](examples/support-desk/README.md) walks through what happened at each step.
 
+Package a passed run with `graft export --out verified.zip`. The [command reference](docs/cli.md#export-a-verified-run) covers portable, vLLM and Goethe exports.
+
 ## How it works
 
 **1. Keep a genome.** A rule is one sentence plus the cases that pin it down. A case is a request and the checks its reply must pass. Counterfactual pairs put two nearly identical requests on either side of a boundary, and both sides have to come out right.
