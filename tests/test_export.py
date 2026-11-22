@@ -30,3 +30,20 @@ class Export(ExampleCase):
         cert = next((self.root / ".graft").rglob("certificate.json"))
         cert.write_text(cert.read_text().replace('"passed": true', '"passed": false', 1))
         self.assertEqual(self.graft("export", "--out", "bad.zip")[0], 1)
+
+    def test_chat_template_arguments_travel_with_the_bundle(self):
+        self.edit(lambda text: text.replace('model = "acme/support-v3"',
+                                            'model = "acme/support-v3"\ntemplate_args = { enable_thinking = false }'))
+        self.assertEqual(self.graft("rebase", "--target", "prod")[0], 0)
+        code, _, err = self.graft("export", "--format", "vllm", "--base-model", "acme/support-v3", "--out", "t.zip")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("note:", err, "the base named is the certified one")
+        with ZipFile(self.root / "t.zip") as z:
+            manifest = json.loads(z.read("manifest.json"))
+        self.assertEqual(manifest["template_args"], {"enable_thinking": False})
+        self.assertEqual(manifest["request_extra_body"], {"chat_template_kwargs": {"enable_thinking": False}})
+        self.assertEqual(manifest["serve_argv"][3:], ["--default-chat-template-kwargs", '{"enable_thinking": false}'])
+        self.assertEqual(manifest["certified_base"]["model"], "acme/support-v3")
+        code, _, err = self.graft("export", "--format", "vllm", "--base-model", "other/model", "--out", "u.zip")
+        self.assertEqual(code, 0)
+        self.assertIn("not on 'other/model'", err)

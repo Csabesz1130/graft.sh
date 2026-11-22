@@ -14,6 +14,7 @@ graft keeps your model's behavior as a genome: rules, the cases that pin each ru
 - [Training](#training)
 - [The certificate](#the-certificate)
 - [Use the graft](#use-the-graft)
+- [Recipe: from a hosted model to your own](#recipe-from-a-hosted-model-to-your-own)
 - [Keep the genome alive](#keep-the-genome-alive)
 - [Settings](#settings)
 - [Troubleshooting](#troubleshooting)
@@ -264,6 +265,36 @@ Runs live under `.graft/`, which `graft init` keeps out of git. Copy a certifica
 | Trained adapter | The new base with the adapter at the path `graft show --graft` prints |
 
 Check what you deployed the same way the rebase did: `graft verify <model> --graft`.
+
+## Recipe: from a hosted model to your own
+
+You do not need an old model of your own to rebase from. Recorded traffic from a hosted model is enough: the recorded replies stand in for the source.
+
+```bash
+graft init
+graft rule add refund-limit "Refunds above $500 are never issued directly. Escalate them to the refunds queue."
+graft capture jsonl traffic.jsonl --rule refund-limit   # {"messages": [..., assistant], "tools": [...]} per line
+graft check                                             # the recorded replies against the verifiers made from them
+```
+
+Name the model you want to move to in `graft.toml`, and rebase without a source:
+
+```toml
+[models.own]
+endpoint = "http://127.0.0.1:8000/v1"
+model = "Qwen/Qwen3-8B"
+```
+
+```bash
+graft rebase --target own
+```
+
+The source line of the output then reads `hold on references`, and the certificate names `references` as its source. What to know:
+
+- Capture one rule's traffic at a time with `--rule`, and write the rule's statement the way you would brief a person: the `prompt` rung states it to the new model.
+- Replies that call tools or return JSON get exact verifiers. Plain-text replies get `similar`, which the certificate counts as weak; replace it with a real verifier where the reply matters.
+- A recorded reply is taken as correct. Recorded mistakes become cases too, so read what you capture and delete what the hosted model got wrong.
+- The certificate says the new model does what was recorded, on these cases. It does not compare the two models on anything else; add a capability suite for that.
 
 ## Keep the genome alive
 

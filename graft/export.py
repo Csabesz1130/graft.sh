@@ -12,7 +12,9 @@ from graft import certificate, genome, rebase
 from graft.config import Project
 
 
-def bundle(project: Project, run: str | None, output: Path, target_format: str, base_model: str | None) -> None:
+def bundle(project: Project, run: str | None, output: Path, target_format: str,
+           base_model: str | None) -> list[str]:
+    """Write the bundle; returns the names (path, model id) the certified base goes by."""
     state = rebase.find_run(project, run, for_graft=True)
     if state.get("status") != "passed":
         raise rebase.RebaseError("only a passed rebase can be exported")
@@ -51,6 +53,16 @@ def bundle(project: Project, run: str | None, output: Path, target_format: str, 
             (stage / "system.txt").write_text(graft["system"], encoding="utf-8")
         manifest = {"format_version": 1, "kind": kind, "certificate_digest": cert["digest"],
                     "target": cert["target"]["name"], "graft": portable}
+        # What the certificate was checked with besides the graft: the exact base, and the chat template arguments
+        # (Qwen3's enable_thinking, for one). Served without them, the model is not the one that was certified.
+        fingerprint = cert["target"].get("fingerprint") or {}
+        base = {k: fingerprint[k] for k in ("path", "model", "revision", "config_sha256") if fingerprint.get(k)}
+        if base:
+            manifest["certified_base"] = base
+        template = fingerprint.get("template_args") or {}
+        if template:
+            manifest["template_args"] = template
+            manifest["request_extra_body"] = {"chat_template_kwargs": template}
         if target_format == "goethe":
             if kind == "lora":
                 raise rebase.RebaseError("Goethe export supports prompt and fast-forward runs; use vllm for LoRA")
@@ -61,6 +73,8 @@ def bundle(project: Project, run: str | None, output: Path, target_format: str, 
             if not base_model:
                 raise rebase.RebaseError("--base-model is required for a vLLM export")
             argv = ["vllm", "serve", base_model]
+            if template:   # the server default; request_extra_body says the same per request
+                argv.extend(["--default-chat-template-kwargs", json.dumps(template, sort_keys=True)])
             model = base_model
             if kind == "lora":
                 if not all((stage / "adapter" / f).is_file()
@@ -76,3 +90,4 @@ def bundle(project: Project, run: str | None, output: Path, target_format: str, 
                 if src.is_file():
                     package.write(src, src.relative_to(stage))
         os.link(archive, output)  # publish complete bytes without replacing another caller's bundle
+    return [str(base[k]) for k in ("path", "model") if base.get(k)]

@@ -391,7 +391,10 @@ def _show(args: argparse.Namespace) -> int:
 
 def _export(args: argparse.Namespace) -> int:
     try:
-        export.bundle(config.load(), args.run, args.out, args.format, args.base_model)
+        certified = export.bundle(config.load(), args.run, args.out, args.format, args.base_model)
+        if args.base_model and certified and args.base_model not in certified:
+            print(f"note: the certificate was checked on {' / '.join(certified)}, not on {args.base_model!r}; "
+                  f"it holds only if they are the same weights", file=sys.stderr)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as err:
         raise rebase.RebaseError(f"could not export: {err}") from err
     print(args.out)
