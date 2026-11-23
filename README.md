@@ -6,11 +6,17 @@
   <img alt="Python 3.11 or newer" src="https://img.shields.io/badge/python-%E2%89%A5%203.11-3776AB?logo=python&logoColor=white">
   <img alt="No dependencies in the core" src="https://img.shields.io/badge/core-standard%20library%20only-3fb950">
   <img alt="Works with any OpenAI-compatible endpoint" src="https://img.shields.io/badge/endpoints-OpenAI--compatible-8a8f98">
-  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <a href="https://github.com/csabesz1130/graft.sh/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/csabesz1130/graft.sh/actions/workflows/ci.yml/badge.svg?branch=main"></a>
 </p>
 
 <p align="center"><b>Git rebase for model behavior. Move to a new base model and keep what your old one got right.</b></p>
+
+<p align="center">
+  <img src="docs/assets/graft-demo.gif" alt="Terminal recording: graft show on a rebase that ended in a conflict on held-out cases, then on a certified run, then graft export for vLLM" width="820">
+</p>
+
+<p align="center"><sub>Real commands on two saved runs (<a href="docs/assets/graft-demo.mp4">MP4</a>). Training ran on a Modal L4 and is cut. The numbers are explained under <a href="#results-on-real-models">Results on real models</a>.</sub></p>
 
 A better open-weight base model comes out every few months. Your fine-tune, your LoRA adapters and your tuned prompts belong to the old one, and none of them carry over. graft keeps what your model does right in a form that outlives any one model: a **behavioral genome** of rules, recorded requests and deterministic checks, in a folder in your own repository. When a new base arrives, `graft rebase` carries the genome onto it on your own hardware and writes a certificate of exactly what held.
 
@@ -141,7 +147,7 @@ What to keep in mind when reading these numbers:
 
 Every run ended in a conflict on held-out cases that differ in kind from the training cases, with training at or near 100%. The extra training cases were written without sight of the held-out cases or of any model output. On the support-desk genome, Qwen3-14B needed no training at all (59/59 from the prompt rung, held out 18/18) and was still refused: the graft cost one of 30 arithmetic answers, above the 2% gate. A 30-question suite cannot tell one fragile answer from a real loss; a larger suite with a paired test is planned.
 
-A model served by vLLM from a `graft export` bundle of the certified Qwen3-8B run passed all 58 certified cases through its OpenAI-compatible endpoint.
+A model served by vLLM from a `graft export` bundle of the certified Qwen3-8B run was checked through its OpenAI-compatible endpoint five times, over three server starts: four passes gave 58 of the 58 certified cases, one gave 57 (a held-out legal case). Served replies are not exactly repeatable from one server start to the next.
 
 ## Known limits
 
@@ -198,4 +204,4 @@ modal volume get graft-runs /my-project/.graft ./results  # the run's evals, ada
 
 ## License
 
-graft is licensed under the [MIT License](LICENSE). The license of each model you rebase still applies.
+graft is licensed under the [Apache License, Version 2.0](LICENSE). The license of each model you rebase still applies.
