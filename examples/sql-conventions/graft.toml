@@ -1,0 +1,31 @@
+# Text-to-SQL with house conventions, checked by executing the SQL. See README.md in this folder.
+
+[genome]
+path = "genome"
+holdout = 0.2       # every case names its own "split": 3 held out per rule, the rest are training cases
+
+[models.qwen3]
+path = "Qwen/Qwen3-8B"
+max_new_tokens = 384
+template_args = { enable_thinking = false }
+
+[rebase]
+ladder = ["zero-shot", "prompt", "lora"]
+rounds = 2
+
+[trainer]
+replay = "replay.jsonl"
+replay_loss = "kl"
+targets = "all-linear"
+gradient_checkpointing = true
+method = "lora"
+epochs = 3
+lr = 2e-4
+rank = 16
+alpha = 32
+batch_size = 8
+max_length = 4096
+
+[suites.arithmetic]
+path = "genome/suites/arithmetic.jsonl"
+max_loss = 0.02

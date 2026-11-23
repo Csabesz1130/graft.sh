@@ -1,0 +1,1 @@
+statement = "Revenue means orders that were paid (paid_at IS NOT NULL) and not cancelled, minus every refund on those orders; an order counts in the period it was created in. Return it in euros, ROUND(cents / 100.0, 2), in a column named revenue_eur."

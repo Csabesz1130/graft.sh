@@ -129,6 +129,20 @@ What to keep in mind when reading these numbers:
 - On a 350M-parameter new base (Granite-4.0-H-350M, CPU), the same recipe could not keep the new base's arithmetic: the graft cost 7% to 23% of the suite whatever the settings, and the gate stopped it.
 - Total compute for all of the above, failed attempts included: about $5 to $6 of Modal time.
 
+### A second genome: SQL conventions
+
+[`examples/sql-conventions`](examples/sql-conventions/) is a harder genome: five house conventions for text-to-SQL, each reply checked by executing it against a fixture database. No rebase of it passed, and that is the result:
+
+| New base | Training cases | Passed in training | Passed held out |
+|---|---|---|---|
+| Qwen3-8B | 45 | 44/45 | 6/15 |
+| Qwen3-14B | 45 | 45/45 | 8/15 |
+| Qwen3-8B | 120 | 120/120 | 10/15 |
+
+Every run ended in a conflict on held-out cases that differ in kind from the training cases, with training at or near 100%. The extra training cases were written without sight of the held-out cases or of any model output. On the support-desk genome, Qwen3-14B needed no training at all (59/59 from the prompt rung, held out 18/18) and was still refused: the graft cost one of 30 arithmetic answers, above the 2% gate. A 30-question suite cannot tell one fragile answer from a real loss; a larger suite with a paired test is planned.
+
+A model served by vLLM from a `graft export` bundle of the certified Qwen3-8B run passed all 58 certified cases through its OpenAI-compatible endpoint.
+
 ## Known limits
 
 This is version 0.1.
@@ -178,6 +192,7 @@ modal volume get graft-runs /my-project/.graft ./results  # the run's evals, ada
 |------|------------|
 | [`graft/`](graft/) | The `graft` command: genome, verifiers, runners, the rebase ladder, the certificate, the trainer |
 | [`examples/support-desk/`](examples/support-desk/) | A complete genome with scripted stand-in models |
+| [`examples/sql-conventions/`](examples/sql-conventions/) | A text-to-SQL genome checked by executing the SQL, with the results of real runs |
 | [`docs/`](docs/) | User guide, genome reference and command reference |
 | [`tests/`](tests/) | Unit tests and end-to-end rebases |
 

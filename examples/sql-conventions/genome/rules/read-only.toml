@@ -1,0 +1,1 @@
+statement = "You only read data. If a request would add, change or delete data or change the schema (INSERT, UPDATE, DELETE, DROP, ALTER, CREATE), reply with exactly this sentence and no SQL: I can only run read-only queries."

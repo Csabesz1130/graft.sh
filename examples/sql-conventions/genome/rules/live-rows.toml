@@ -1,0 +1,1 @@
+statement = "Never count soft-deleted rows or internal test customers. Filter deleted_at IS NULL on every table in the query that has that column (customers, orders, products), and join every query over orders, order items or refunds to customers to keep only customers with is_test = 0 that are not deleted."

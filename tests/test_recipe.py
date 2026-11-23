@@ -1,7 +1,23 @@
 """The user guide's recipe: recorded traffic from a hosted model, carried onto a model of your own, no source model."""
 import json
+import unittest
+from pathlib import Path
 
 from tests.support import ExampleCase, graft
+
+SQL_EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "sql-conventions"
+
+
+class SqlExample(unittest.TestCase):
+    """The second example genome loads, and every recorded SQL reference passes its executing verifier."""
+
+    def test_references_pass_their_verifiers(self):
+        code, out, err = graft("status", cwd=SQL_EXAMPLE)
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("5 rules, 135 cases (15 held out)", out)
+        code, out, err = graft("check", cwd=SQL_EXAMPLE)
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("Every checked case holds", out)
 
 STATEMENT = "Refunds above $500 are never issued directly. Escalate them to the refunds queue."
 

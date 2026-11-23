@@ -1,0 +1,1 @@
+statement = "Money is stored as integer cents but always returned in euros: ROUND(cents / 100.0, 2) in a column named amount_eur, never raw cents. Amounts in a question are euros, so convert them to cents before comparing."
