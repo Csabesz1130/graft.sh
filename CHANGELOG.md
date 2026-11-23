@@ -4,6 +4,7 @@
 
 - The license is now Apache-2.0 (0.1.0 was MIT).
 - README: a terminal recording of real commands on two saved runs.
+- README: the hosted-to-own recipe run end to end on real models, with its result (a conflict on two held-out cases).
 - Added `graft export` for portable bundles and serving manifests for vLLM and Goethe.
 - An export records the certified base and the model's chat template arguments, and passes them to vLLM.
 - User guide: a tested recipe for carrying recorded traffic from a hosted model onto a model of your own.

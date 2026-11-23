@@ -294,6 +294,8 @@ The source line of the output then reads `hold on references`, and the certifica
 - Capture one rule's traffic at a time with `--rule`, and write the rule's statement the way you would brief a person: the `prompt` rung states it to the new model.
 - Replies that call tools or return JSON get exact verifiers. Plain-text replies get `similar`, which the certificate counts as weak; replace it with a real verifier where the reply matters.
 - A recorded reply is taken as correct. Recorded mistakes become cases too, so read what you capture and delete what the hosted model got wrong.
+- `graft capture` pins tool-call arguments and JSON exactly, free text included (an escalation's reason, a ticket's summary). A second model will not write the same free text: replace those verifiers with ones that check what matters (the tool and the fields that carry the decision), and mark held-out cases, before you rebase.
+- One real run of this recipe is described in the README (Qwen3-14B as the hosted model, onto Qwen3-8B): it ended in a conflict on two held-out cases.
 - The certificate says the new model does what was recorded, on these cases. It does not compare the two models on anything else; add a capability suite for that.
 
 ## Keep the genome alive

@@ -147,6 +147,12 @@ What to keep in mind when reading these numbers:
 
 Every run ended in a conflict on held-out cases that differ in kind from the training cases, with training at or near 100%. The extra training cases were written without sight of the held-out cases or of any model output. On the support-desk genome, Qwen3-14B needed no training at all (59/59 from the prompt rung, held out 18/18) and was still refused: the graft cost one of 30 arithmetic answers, above the 2% gate. A 30-question suite cannot tell one fragile answer from a real loss; a larger suite with a paired test is planned.
 
+### From a hosted model to your own, run for real
+
+The [recipe](docs/user-guide.md#recipe-from-a-hosted-model-to-your-own) was run end to end once. Qwen3-14B behind vLLM's API, with the five support-desk rules in its system prompt, played the hosted model and answered 99 requests; `graft capture` turned the recorded traffic into cases. Capture pins tool-call arguments and JSON exactly, free text included, so each case then got the support-desk genome's hand-written verifiers and held-out split; the recorded replies were left as they were. The hosted model itself failed 20 of the 99 cases, which the rebase left out.
+
+Rebased onto Qwen3-8B with no source model (22 minutes on one 24 GB A10G): 61 of 79 cases as it is, 69 after the prompt rung, 77 with a trained adapter. Every training case passed (51/51); 26 of 28 held-out cases did. The two that failed were written blind: a 15-digit card number given back as "ending in 005", and a $550 refund issued as two smaller ones. The rebase ended in a conflict and `graft export` refused the run, so this chain stops before serving.
+
 A model served by vLLM from a `graft export` bundle of the certified Qwen3-8B run was checked through its OpenAI-compatible endpoint five times, over three server starts: four passes gave 58 of the 58 certified cases, one gave 57 (a held-out legal case). Served replies are not exactly repeatable from one server start to the next.
 
 ## Known limits
