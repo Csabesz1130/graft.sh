@@ -121,7 +121,7 @@ graft 0.1.0 was run end to end on Modal GPUs (one 24 GB L4 for the 8B runs) with
 | Qwen3-8B | dense transformer (another lab, another tokenizer) | **passed** | 58/58 | 18/18 (95% lower bound 76.6%, after 6 looks) | 63.3% / 93.3% / 96.7% (p = 0.002 against the old model) |
 | Granite-4.0-H-Tiny (7B) | hybrid Mamba-2 + mixture of experts | conflict | 56/58 | 16/18: two legal cases, one of them blind | not reached |
 
-Forgetting, on GSM8K's first 100 test problems (plain new base against the grafted one, same questions): Granite-4.0-H-Tiny 88 → 89, Qwen3-8B 92 → 93, 3 gained and 2 lost each. These were measured on earlier adapters of the same runs (Granite: its certified adapter for the previous 59-case genome; Qwen3: an adapter that passed 41 of 45 cases), not on the final ones above. On Granite-4.0-H-Tiny, the same settings also passed a 59-case version of the genome outright: 45/45, held out 10/10.
+Forgetting, on GSM8K's first 100 test problems (plain new base against the grafted one, same questions): the certified Qwen3-8B adapter scores 92 → 93 (2 gained, 1 lost); on a 20-question multiplication set it loses one answer (20 → 19). Granite-4.0-H-Tiny scored 88 → 89 (3 gained, 2 lost) with its certified adapter for the earlier 59-case genome (45/45, held out 10/10); its adapter for the final genome was not scored.
 
 What to keep in mind when reading these numbers:
 - A held-out set of 18 cases supports a modest bound: 76.6% at 95% confidence is what 18 of 18, looked at 6 times, can show.
