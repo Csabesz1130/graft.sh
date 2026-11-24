@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- The license is now the Functional Source License, Version 1.1, ALv2 Future License (FSL-1.1-ALv2). Each version
+  becomes Apache-2.0 two years after its release; 0.1.1 and earlier stay Apache-2.0. The README explains in plain
+  words what the license allows.
+- Added TRADEMARKS.md, a contributor license agreement (CLA.md) with a CLA check on pull requests, and CONTRIBUTING.md.
+
 ## 0.1.1
 
 - The license is now Apache-2.0 (0.1.0 was MIT).

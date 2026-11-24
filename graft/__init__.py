@@ -1,3 +1,3 @@
 """graft: rebase a model's verified behavior onto a new base model."""
 
-__version__ = "0.1.1"
+__version__ = "0.2.0.dev0"

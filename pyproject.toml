@@ -6,8 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "graft-sh"
 description = "Rebase a model's verified behavior onto a new base model."
 readme = "README.md"
-license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE"]
+license = "FSL-1.1-ALv2"
+license-files = ["LICENSE", "NOTICE", "TRADEMARKS.md"]
 authors = [{ name = "Balogh Csaba" }]
 requires-python = ">=3.11"
 dynamic = ["version"]

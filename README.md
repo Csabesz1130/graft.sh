@@ -6,7 +6,7 @@
   <img alt="Python 3.11 or newer" src="https://img.shields.io/badge/python-%E2%89%A5%203.11-3776AB?logo=python&logoColor=white">
   <img alt="No dependencies in the core" src="https://img.shields.io/badge/core-standard%20library%20only-3fb950">
   <img alt="Works with any OpenAI-compatible endpoint" src="https://img.shields.io/badge/endpoints-OpenAI--compatible-8a8f98">
-  <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+  <a href="#license"><img alt="FSL-1.1-ALv2 license" src="https://img.shields.io/badge/license-FSL--1.1--ALv2-blue"></a>
   <a href="https://github.com/csabesz1130/graft.sh/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/csabesz1130/graft.sh/actions/workflows/ci.yml/badge.svg?branch=main"></a>
 </p>
 
@@ -210,4 +210,25 @@ modal volume get graft-runs /my-project/.graft ./results  # the run's evals, ada
 
 ## License
 
-graft is licensed under the [Apache License, Version 2.0](LICENSE). The license of each model you rebase still applies.
+From version 0.2.0, graft is licensed under the [Functional Source License, Version 1.1, ALv2 Future License](LICENSE) (FSL-1.1-ALv2). Each version turns into [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) two years after its release. Versions 0.1.1 and earlier were released under Apache-2.0 and stay under it. The license of each model you rebase still applies.
+
+### What the license allows, in plain words
+
+This section is a summary. If it and [LICENSE](LICENSE) disagree, LICENSE is what counts.
+
+**You may**, without asking and without paying:
+
+- run graft at work to rebase, verify and certify your own models, including models in your company's commercial products;
+- read, change and fork the code, and share your changes under the same license;
+- use graft for teaching and for non-commercial research;
+- use graft as a consultant or agency on a client's models, when the client uses it under this license too.
+
+Whatever graft produces for you is yours: genomes, adapters, merged weights, certificates and export bundles are not covered by the license of graft's code.
+
+**You may not**, without a commercial license from us, make graft available to others in a commercial product or service that substitutes for graft, or offers the same or substantially similar functionality. For example: a hosted "rebase your model" service built on graft, or a fine-tuning platform that ships graft's rebase or certificate as one of its features.
+
+**Two years after each release**, that version is also available under Apache-2.0, with no restriction on competing use.
+
+**A commercial license** for a use the license does not allow: contact the maintainer, [Csabesz1130 on GitHub](https://github.com/Csabesz1130).
+
+The names "graft" and "graft.sh" are not licensed with the code; see [TRADEMARKS.md](TRADEMARKS.md). Contributions are accepted under the [contributor license agreement](CLA.md); see [CONTRIBUTING.md](CONTRIBUTING.md).
