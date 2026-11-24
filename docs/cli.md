@@ -53,16 +53,17 @@ Adds `genome/rules/<id>.toml`. The statement is the behavior in a sentence or tw
 
 ### `graft capture goethe <folder>`
 
-Reads a [Goethe](https://github.com/meshapplied/goethe) trace folder and adds one case per chat-completions turn that finished cleanly. The request is the turn's full history, rebuilt through its parent turns; the reference is the recorded reply. Verifiers are derived from the reply: exact tool calls, exact JSON, or `similar` for plain text. A regenerated reply replaces the earlier one for the same request. Turns from other APIs, failed or cut-off turns, and turns whose history is gone are skipped and counted.
+Reads a [Goethe](https://github.com/meshapplied/goethe) trace folder and adds one case per chat-completions turn that finished cleanly. The request is the turn's full history, rebuilt through its parent turns; the reference is the recorded reply. Verifiers are derived from the reply. By default (`--checks structured`) they pin what the reply decided: the tools called, their order and number, numbers, booleans, ids and codes, values from a tool's `enum`, and values copied from the request. Other strings, prose such as an escalation's reason or a ticket's summary, only have to be present and non-empty, and a reply that was only JSON must stay only JSON. `--checks exact` pins every value, prose included. Plain text gets `similar` either way. A regenerated reply replaces the earlier one for the same request. Turns from other APIs, failed or cut-off turns, and turns whose history is gone are skipped and counted.
 
 | Option | Meaning |
 |---|---|
 | `--rule <id>` | The rule the cases go under. Default `recorded`; it is created if missing |
 | `--model <id>` | Only turns served by this model id |
 | `--since <time>` | Only turns that started at or after this UTC time, for example `2026-11-01` |
-| `--tools-only` | Only turns whose reply calls a tool: these get exact verifiers |
+| `--tools-only` | Only turns whose reply calls a tool |
 | `--limit <n>` | Add at most this many cases |
 | `--dry-run` | Say what would be added; write nothing |
+| `--checks structured` or `exact` | What the derived verifiers pin, as above. Default `structured` |
 
 Running it again adds only cases that are not there yet.
 
@@ -73,6 +74,7 @@ Reads a chat fine-tuning file: one `{"messages": [...], "tools": [...]}` object 
 | Option | Meaning |
 |---|---|
 | `--every-turn` | A case for every assistant turn, not just the last |
+| `--checks structured` or `exact` | What the derived verifiers pin; see `capture goethe`. Default `structured` |
 | `--rule`, `--limit`, `--dry-run` | As for `capture goethe` |
 
 ## Checking

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- `graft capture` derives structured checks by default: tool names, order and count, numbers, ids and codes, enum values and values copied from the request are pinned; other strings only have to be non-empty; a JSON-only reply must stay JSON-only. `--checks exact` keeps 0.1's behaviour. The summary line counts the loosened values.
+
 ## 0.1.1
 
 - The license is now Apache-2.0 (0.1.0 was MIT).

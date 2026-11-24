@@ -70,7 +70,7 @@ statement = "Refunds above $500 are never issued directly. Escalate them to the 
               {"type": "no_tool_call", "name": "issue_refund"}]}]}
 ```
 
-Checks are deterministic: text and regex matches, JSON schemas, exact tool calls, or your own program. No model grades another model. `graft capture` turns recorded production traffic (a [Goethe](https://github.com/meshapplied/goethe) trace folder, or a chat fine-tuning file) into cases.
+Checks are deterministic: text and regex matches, JSON schemas, tool calls and their arguments, or your own program. No model grades another model. `graft capture` turns recorded production traffic (a [Goethe](https://github.com/meshapplied/goethe) trace folder, or a chat fine-tuning file) into cases.
 
 **2. Rebase.** `graft rebase --target <new-base>` climbs a ladder and stops at the first rung where every gate holds:
 
@@ -149,7 +149,7 @@ Every run ended in a conflict on held-out cases that differ in kind from the tra
 
 ### From a hosted model to your own, run for real
 
-The [recipe](docs/user-guide.md#recipe-from-a-hosted-model-to-your-own) was run end to end once. Qwen3-14B behind vLLM's API, with the five support-desk rules in its system prompt, played the hosted model and answered 99 requests; `graft capture` turned the recorded traffic into cases. Capture pins tool-call arguments and JSON exactly, free text included, so each case then got the support-desk genome's hand-written verifiers and held-out split; the recorded replies were left as they were. The hosted model itself failed 20 of the 99 cases, which the rebase left out.
+The [recipe](docs/user-guide.md#recipe-from-a-hosted-model-to-your-own) was run end to end once. Qwen3-14B behind vLLM's API, with the five support-desk rules in its system prompt, played the hosted model and answered 99 requests; `graft capture` turned the recorded traffic into cases. graft 0.1.1's capture pinned tool-call arguments and JSON exactly, free text included, so each case then got the support-desk genome's hand-written verifiers and held-out split; the recorded replies were left as they were. (From 0.2, capture's default checks pin the decisions and let free text vary: on this run's 51 tool-call and JSON cases they give the same verdict as the hand-written verifiers on every one of the new model's 204 replies across four steps.) The hosted model itself failed 20 of the 99 cases, which the rebase left out.
 
 Rebased onto Qwen3-8B with no source model (22 minutes on one 24 GB A10G): 61 of 79 cases as it is, 69 after the prompt rung, 77 with a trained adapter. Every training case passed (51/51); 26 of 28 held-out cases did. The two that failed were written blind: a 15-digit card number given back as "ending in 005", and a $550 refund issued as two smaller ones. The rebase ended in a conflict and `graft export` refused the run, so this chain stops before serving.
 

@@ -80,7 +80,7 @@ graft capture goethe ~/.goethe/traces --model acme/support-v3 --tools-only
 graft capture jsonl finetune-data.jsonl
 ```
 
-Each assistant turn becomes a case with the recorded reply as its reference. Replies that call tools or return JSON get exact verifiers. Plain-text replies get a similarity check, which is weak: it is a placeholder until you write a real verifier. Captured cases go under the rule `recorded` unless you pass `--rule`. Read what you capture: recorded traffic includes the model's mistakes, and holds whatever your users typed.
+Each assistant turn becomes a case with the recorded reply as its reference. Replies that call tools or return JSON get verifiers that pin what the reply decided (the tool, its order and number, numbers, ids and codes, enum values, values copied from the request) and only require free text such as a reason or a summary to be present; `--checks exact` pins every value instead. Plain-text replies get a similarity check, which is weak: it is a placeholder until you write a real verifier. Captured cases go under the rule `recorded` unless you pass `--rule`. Read what you capture: recorded traffic includes the model's mistakes, and holds whatever your users typed.
 
 **Check the genome against its own source.**
 
@@ -292,9 +292,9 @@ graft rebase --target own
 The source line of the output then reads `hold on references`, and the certificate names `references` as its source. What to know:
 
 - Capture one rule's traffic at a time with `--rule`, and write the rule's statement the way you would brief a person: the `prompt` rung states it to the new model.
-- Replies that call tools or return JSON get exact verifiers. Plain-text replies get `similar`, which the certificate counts as weak; replace it with a real verifier where the reply matters.
+- Replies that call tools or return JSON get verifiers that pin the decisions and let free text vary (see [Build a genome](#build-a-genome)). Plain-text replies get `similar`, which the certificate counts as weak; replace it with a real verifier where the reply matters.
 - A recorded reply is taken as correct. Recorded mistakes become cases too, so read what you capture and delete what the hosted model got wrong.
-- `graft capture` pins tool-call arguments and JSON exactly, free text included (an escalation's reason, a ticket's summary). A second model will not write the same free text: replace those verifiers with ones that check what matters (the tool and the fields that carry the decision), and mark held-out cases, before you rebase.
+- Check what capture pinned before you rebase: `graft check` passes the recorded replies by construction, so read a few cases. A value that is a decision but reads like prose (a free-text status, say) is loosened; pin it in the case's `verify`. A value copied from the request is pinned even when it is incidental. Mark held-out cases with `"split"` where you want them chosen by hand; otherwise `[genome] holdout` picks them.
 - One real run of this recipe is described in the README (Qwen3-14B as the hosted model, onto Qwen3-8B): it ended in a conflict on two held-out cases.
 - The certificate says the new model does what was recorded, on these cases. It does not compare the two models on anything else; add a capability suite for that.
 
