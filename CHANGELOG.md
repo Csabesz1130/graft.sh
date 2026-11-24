@@ -6,6 +6,7 @@
   becomes Apache-2.0 two years after its release; 0.1.1 and earlier stay Apache-2.0. The README explains in plain
   words what the license allows.
 - Added TRADEMARKS.md, a contributor license agreement (CLA.md) with a CLA check on pull requests, and CONTRIBUTING.md.
+- `graft capture` derives structured checks by default: tool names, order and count, numbers, ids and codes, enum values and values copied from the request are pinned; other strings only have to be non-empty; a JSON-only reply must stay JSON-only. `--checks exact` keeps 0.1's behaviour. The summary line counts the loosened values.
 
 ## 0.1.1
 

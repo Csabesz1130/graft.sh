@@ -100,7 +100,9 @@ class Jsonl(unittest.TestCase):
             self.assertEqual(len(last), 1)
             self.assertEqual(len(last[0]["messages"]), 3)
             every = capture.from_jsonl(path, every_turn=True)
-            self.assertEqual(every[0]["verify"], [{"type": "json", "equals": {"k": 1}}])
+            self.assertEqual(every[0]["verify"][0], {"type": "json", "subset": {"k": 1}})
+            exact = capture.from_jsonl(path, every_turn=True, checks="exact")
+            self.assertEqual(exact[0]["verify"], [{"type": "json", "equals": {"k": 1}}])
             self.assertEqual(len(every), 2)
             path.write_text("[1]\n")
             with self.assertRaisesRegex(capture.CaptureError, "ft.jsonl:1"):
@@ -109,3 +111,78 @@ class Jsonl(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+TOOLS_REFUND = [{"type": "function", "function": {"name": "escalate", "parameters": {"type": "object", "properties": {
+    "queue": {"type": "string"}, "reason": {"type": "string"},
+    "urgency": {"type": "string", "enum": ["next business day", "same day"]}}}}}]
+
+
+class StructuredChecks(unittest.TestCase):
+    """capture's default checks pin what a reply decided and let a second model word the rest its own way."""
+
+    def verify(self, reply, messages, tools=None, loosened=None):
+        return capture.structured_verifiers(verifiers.normalize(reply), messages, tools, loosened)
+
+    def failures(self, checks, reply):
+        return verifiers.failures(checks, verifiers.normalize(reply), {})
+
+    def test_tool_call_pins_decisions_and_loosens_prose(self):
+        messages = [{"role": "user", "content": "Refund $900 for order #77, ship it to Main Street 5."}]
+        recorded = {"tool_calls": [{"name": "escalate", "arguments": {
+            "queue": "refunds", "reason": "Amount is above the limit.", "urgency": "same day",
+            "address": "Main Street 5", "amount": 900, "order_id": "77", "vip": False}}]}
+        loosened = [0]
+        checks = self.verify(recorded, messages, TOOLS_REFUND, loosened)
+        args = checks[0]["arguments"]
+        self.assertEqual(args["reason"], {"$regex": r"\S"}, "prose only has to be there")
+        self.assertEqual(args["urgency"], "same day", "a value from the tool's enum is a decision")
+        self.assertEqual(args["address"], "Main Street 5", "a value copied from the request is a fact")
+        self.assertEqual((args["queue"], args["amount"], args["order_id"], args["vip"]), ("refunds", 900, "77", False))
+        self.assertEqual(loosened, [1])
+        other_words = {"tool_calls": [{"name": "escalate", "arguments": {**recorded["tool_calls"][0]["arguments"],
+                                                                        "reason": "Over $500, needs a human."}}]}
+        self.assertEqual(self.failures(checks, other_words), [])
+        for key, value in (("amount", 90), ("queue", "billing"), ("urgency", "next business day"), ("reason", "")):
+            changed = {"tool_calls": [{"name": "escalate", "arguments": {
+                **recorded["tool_calls"][0]["arguments"], key: value}}]}
+            self.assertTrue(self.failures(checks, changed), key)
+        twice = {"tool_calls": recorded["tool_calls"] * 2}
+        self.assertTrue(self.failures(checks, twice), "the number of calls is pinned")
+
+    def test_json_reply_pins_codes_and_must_stay_json(self):
+        messages = [{"role": "user", "content": "File a ticket: the store locator is down."}]
+        recorded = {"content": '{"priority": "high", "summary": "Store locator is down", "ticket": "T-17"}'}
+        checks = self.verify(recorded, messages)
+        self.assertEqual(checks[0], {"type": "json", "subset": {
+            "priority": "high", "summary": {"$regex": r"\S"}, "ticket": "T-17"}})
+        ok = '```json\n{"priority": "high", "summary": "Locator outage", "ticket": "T-17"}\n```'
+        self.assertEqual(self.failures(checks, {"content": ok}), [])
+        wrapped = '[calls tool file_ticket with {"priority": "high", "summary": "x", "ticket": "T-17"}]'
+        self.assertTrue(self.failures(checks, {"content": wrapped}), "JSON inside prose is not JSON only")
+        self.assertTrue(self.failures(checks, {"content": '{"priority": "normal", "summary": "x", "ticket": "T-17"}'}))
+
+    def test_plain_text_stays_a_weak_similarity_check(self):
+        checks = self.verify({"content": "Sorry, I cannot give legal advice."},
+                             [{"role": "user", "content": "Can I sue?"}])
+        self.assertTrue(any(v["type"] == "similar" for v in checks))
+
+    def test_cli_reports_what_was_loosened(self):
+        from tests.support import graft
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertEqual(graft("init", cwd=root)[0], 0)
+            row = {"messages": [{"role": "user", "content": "Refund $900 for order #77."},
+                                {"role": "assistant", "content": None, "tool_calls": [{"id": "1", "type": "function",
+                                 "function": {"name": "escalate", "arguments": json.dumps(
+                                     {"queue": "refunds", "reason": "Above the limit."})}}]}]}
+            (root / "t.jsonl").write_text(json.dumps(row) + "\n")
+            code, out, err = graft("capture", "jsonl", "t.jsonl", cwd=root)
+            self.assertEqual(code, 0, err)
+            self.assertIn("1 free-text values", out)
+            case = json.loads(next((root / "genome" / "cases").glob("*.jsonl")).read_text())
+            self.assertEqual(case["verify"][0]["arguments"], {"queue": "refunds", "reason": {"$regex": r"\S"}})
+            (root / "genome" / "cases" / "recorded.jsonl").unlink()
+            self.assertEqual(graft("capture", "jsonl", "t.jsonl", "--checks", "exact", cwd=root)[0], 0)
+            case = json.loads(next((root / "genome" / "cases").glob("*.jsonl")).read_text())
+            self.assertEqual(case["verify"][0]["arguments"], {"queue": "refunds", "reason": "Above the limit."})

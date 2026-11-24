@@ -67,6 +67,10 @@ def _parser() -> argparse.ArgumentParser:
         parser.add_argument("--rule", default="recorded", help="the rule the cases go under. default: recorded")
         parser.add_argument("--limit", type=int, help="add at most this many cases")
         parser.add_argument("--dry-run", action="store_true", help="say what would be added. write nothing")
+        parser.add_argument("--checks", choices=capture.CHECKS, default="structured",
+                            help="structured: pin decisions (tools, numbers, ids, enum values, values from the "
+                                 "request), require free text to be non-empty. exact: pin every value. "
+                                 "default: structured")
 
     check = sub.add_parser("check", help="check the genome against the model that has the behavior today")
     check.add_argument("--model", help="a model from graft.toml. default: the recorded reference replies")
@@ -191,12 +195,14 @@ def _rule(args: argparse.Namespace) -> int:
 
 def _capture(args: argparse.Namespace) -> int:
     project = config.load()
+    loosened = [0]   # free-text values that only have to be present, counted while cases are made
     if args.kind == "goethe":
-        cases, skipped = capture.from_goethe(args.folder, args.model, args.since, args.tools_only)
+        cases, skipped = capture.from_goethe(args.folder, args.model, args.since, args.tools_only, args.checks,
+                                             loosened)
     else:
         if not Path(args.file).is_file():
             raise capture.CaptureError(f"{args.file}: no such file")
-        cases, skipped = capture.from_jsonl(Path(args.file), args.every_turn), {}
+        cases, skipped = capture.from_jsonl(Path(args.file), args.every_turn, args.checks, loosened), {}
     if args.limit is not None:
         cases = cases[:args.limit]
     weak = sum(verifiers.weak_only(c["verify"]) for c in cases)
@@ -211,6 +217,9 @@ def _capture(args: argparse.Namespace) -> int:
     verb = "would add" if args.dry_run else "added"
     print(f"{verb} {added} cases under {args.rule}" + (f" ({len(cases) - added} were already there)"
                                                         if added < len(cases) else ""))
+    if loosened[0]:
+        print(f"  {loosened[0]} free-text values (a reason, a summary) only have to be non-empty; decisions, ids and "
+              f"values from the request are pinned. --checks exact pins them all")
     for reason, count in skipped.items():
         print(f"  skipped {count}: {reason}")
     if weak:
