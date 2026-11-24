@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -30,6 +31,19 @@ PASSED, CONFLICT, PAUSED = 0, 1, 3
 
 PREAMBLE = "Standing rules. They apply to every reply and come before your defaults."
 EXAMPLES = "Examples of these rules applied:"
+
+
+def graft_stage(state: dict[str, Any]) -> str | None:
+    """The stage that checked the run's current graft: not always the last one, when an earlier round was kept.
+    Runs from before 0.2 do not record it: for them, a lora graft names its round in the adapter path, and
+    anything else was checked by the last stage."""
+    if state.get("graft_stage"):
+        return state["graft_stage"]
+    stages = [s["stage"] for s in state.get("stages") or []]
+    found = re.search(r"round-(\d+)", str((state.get("graft") or {}).get("adapter", "")))
+    if found and f"lora round {found.group(1)}" in stages:
+        return f"lora round {found.group(1)}"
+    return stages[-1] if stages else None
 
 
 class RebaseError(Exception):
@@ -277,6 +291,7 @@ class Rebase:
         entry = {"stage": stage, "passed": sums["passed"], "total": sums["total"],
                  "rules_ok": sums["rules_ok"], "rules": sums["rules"], **(extra or {})}
         self.state["stages"] = [s for s in self.state["stages"] if s["stage"] != stage] + [entry]
+        self.state["graft_stage"] = stage   # the stage that checked the graft the run has now
         self.save()
         self.last = results
         self.say(f"{stage:<18}{sums['passed']}/{sums['total']} cases   "
@@ -588,7 +603,7 @@ class Rebase:
         # rung ends without passing.
         best: tuple[int, dict[str, Any], str] | None = None
         if self.state["graft"].get("kind") == "lora" and self.last:
-            best = (self.train_passes(self.last), self.state["graft"], self.state["stages"][-1]["stage"])
+            best = (self.train_passes(self.last), self.state["graft"], graft_stage(self.state))
         for number in range(start, start + int(self.opt("rounds", 3))):
             folder = self.dir / "lora" / f"round-{number}"
             adapter = folder / "adapter"
@@ -627,6 +642,7 @@ class Rebase:
             sampler, sampling_graft = self.runner_for(graft), graft
         if best is not None and best[1] is not self.state["graft"]:
             self.state["graft"], self.last = best[1], self.stored(best[2])
+            self.state["graft_stage"] = best[2]
             self.save()
             self.say(f"{'keeping':<18}{best[2]}: it passed the most training cases ({best[0]})")
         return False

@@ -212,6 +212,13 @@ class Ladder(ExampleCase):
         stages = {s["stage"]: s["passed"] for s in cert["ladder"]}
         self.assertGreater(stages["lora round 1"], stages["lora round 2"])
         self.assertEqual(cert["totals"]["passed"], stages["lora round 1"], "the certificate describes the kept round")
+        line = self.graft("log")[1].splitlines()[0]
+        kept = next(s for s in cert["ladder"] if s["stage"] == "lora round 1")
+        self.assertIn(f"{kept['passed']}/{kept['total']}", line, "graft log shows the kept round, not the last")
+        self.assertEqual(state["graft_stage"], "lora round 1")
+        # a run saved before 0.2 has no graft_stage: the adapter path still names the kept round
+        state.pop("graft_stage")
+        self.assertEqual(rebase.graft_stage(state), "lora round 1")
 
     def test_of_equal_rounds_the_latest_is_kept(self):
         # the same rules learned in every round: equal on the training cases, so the latest round stays

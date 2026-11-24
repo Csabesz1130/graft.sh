@@ -7,6 +7,7 @@
   words what the license allows.
 - Added TRADEMARKS.md, a contributor license agreement (CLA.md) with a CLA check on pull requests, and CONTRIBUTING.md.
 - `graft capture` derives structured checks by default: tool names, order and count, numbers, ids and codes, enum values and values copied from the request are pinned; other strings only have to be non-empty; a JSON-only reply must stay JSON-only. `--checks exact` keeps 0.1's behaviour. The summary line counts the loosened values.
+- `graft log` shows the score of the round a run kept, not of its last round (they differ when a later lora round did worse). Runs record the stage of their graft; for older runs it is read from the adapter path.
 
 ## 0.1.1
 

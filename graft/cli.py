@@ -353,7 +353,8 @@ def _log(args: argparse.Namespace) -> int:
         return 0
     width = max(len(f"{s['target']}/{s['run']}") for s in known)
     for state in reversed(known):
-        last = state["stages"][-1] if state["stages"] else {}
+        kept = rebase.graft_stage(state)
+        last = next((s for s in state["stages"] if s["stage"] == kept), {})
         score = f"{last.get('passed', 0)}/{last.get('total', 0)}" if last else ""
         print(f"{state['target'] + '/' + state['run']:<{width}}  {state['status']:<9} "
               f"{state.get('outcome') or '':<13}{score:<9}{state.get('started', '')}  "
