@@ -41,6 +41,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Find a hanging test (temporary)
+        timeout-minutes: 8
+        run: |
+          python -m pip install -q -e .
+          python -c "import faulthandler,unittest; faulthandler.dump_traceback_later(240, exit=True); unittest.main(module=None, argv=['t','discover','-s','tests','-v'])"
       - name: Run the installed CLI, unit and demo tests
         env:
           GRAFT_TEST_PYTHON: python
