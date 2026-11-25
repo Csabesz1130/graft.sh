@@ -50,7 +50,7 @@ VPY="${WORK}/venv/bin/python"; GRAFT="${WORK}/venv/bin/graft"
 mkdir "${WORK}/src" || exit 2
 tar -C "${REPO}" --exclude-vcs --exclude=.graft --exclude=.venv --exclude=__pycache__ \
   --exclude=.pytest_cache --exclude=.ruff_cache --exclude='*.pyc' -cf - \
-  LICENSE README.md pyproject.toml graft examples scripts tests | tar -xf - -C "${WORK}/src" || exit 2
+  LICENSE NOTICE TRADEMARKS.md README.md pyproject.toml graft examples scripts tests | tar -xf - -C "${WORK}/src" || exit 2
 run "pip install ." "${VPY}" -m pip install -q "${WORK}/src"
 run "graft --version" "${GRAFT}" --version
 
@@ -65,7 +65,7 @@ if [ "${TRAIN}" = 1 ]; then
   if [ -n "${GRAFT_TORCH_INDEX_URL:-}" ]; then
     "${VPY}" -m pip install -q --index-url "${GRAFT_TORCH_INDEX_URL}" 'torch>=2.2' || exit 1
   fi
-  run "pip install .[train]" "${VPY}" -m pip install -q "${WORK}/src[train]"
+  run "pip install .[train,sign]" "${VPY}" -m pip install -q "${WORK}/src[train,sign]"
   "${VPY}" -c 'import torch; print("torch", torch.__version__, "cuda", torch.cuda.is_available())'
 fi
 

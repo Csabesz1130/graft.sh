@@ -81,6 +81,22 @@ class Trainer(unittest.TestCase):
         self.assertLess(losses[-1], losses[0] - 0.1, "the loss falls")
         self.assertNotEqual(self.answers(output), self.answers(None), "the adapter changes what the model says")
 
+    def test_merged_weights_answer_like_base_plus_adapter(self):
+        output, _ = self.train("lora", "--epochs", "40", "--lr", "0.02", "--rank", "8")
+        merged = self.root / "merged"
+        done = subprocess.run([sys.executable, "-m", "graft.merge_hf", "--base", str(self.root / "base"),
+                               "--adapter", str(output), "--output", str(merged), "--dtype", "float32"],
+                              capture_output=True, text=True, check=False)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertFalse((merged / "adapter_config.json").exists(), "a plain model, no adapter left")
+        from graft import runners
+        runner = runners.build("merged", {"path": str(merged), "max_new_tokens": 6, "device": "cpu"}, self.root)
+        self.assertEqual({q: runner.complete([{"role": "user", "content": q}])["content"] for q in FACTS},
+                         self.answers(output))
+        again = subprocess.run([sys.executable, "-m", "graft.merge_hf", "--base", str(self.root / "base"),
+                                "--output", str(merged)], capture_output=True, text=True, check=False)
+        self.assertEqual(again.returncode, 2, "never writes over an existing folder")
+
     def losses(self, log: str) -> list[float]:
         return [float(line.split("loss ")[1].split()[0]) for line in log.splitlines() if line.startswith("epoch")]
 

@@ -102,6 +102,12 @@ With `--graft`, a trained adapter whose files changed since the rebase is refuse
 
 Use it in CI to gate any change to a model, a prompt or the serving stack.
 
+#### `graft verify <model> --against <certified>`
+
+Checks a deployment against a certificate: a run (`target/run`), a `certificate.json` or an export bundle `.zip`. It runs the cases the certificate counted as passing, sends the certified prompt graft if there is one (a trained adapter is the server's part: served, merged, or quantized into a GGUF), and exits 1 if any of them fails now. Use it whenever the serving side changes: another engine, a quantization, a chat template, a GPU.
+
+The genome must be the one the certificate checked; `--graft` and `--rule` cannot be combined with it. `--json` reports `certified_cases`, `passed`, `ok` and every failure with its reply.
+
 ### `graft models`
 
 Lists the models in `graft.toml` and sends each endpoint one short request to see whether it answers. Models loaded in process are listed but not loaded. Exits 1 when a model does not answer.
@@ -145,10 +151,33 @@ Prints a rebase's certificate as a readable report and checks its digest. Exits 
 
 A run's files are in `.graft/grafts/<target>/<run>/`: `certificate.json`, `REPORT.md`, `graft.json`, the evaluation of every step under `evals/`, and each training round's dataset, log and adapter under `lora/`.
 
+## Signing
+
+### `graft keygen`
+
+Makes an Ed25519 key: the private key at `~/.config/graft/signing-key.pem` (mode 0600; `--key` or `$GRAFT_SIGNING_KEY` for another place) and the public key next to it as `.pub`. It never overwrites a key. Needs `pip install 'graft-sh[sign]'`.
+
+### `graft sign [run]`
+
+Signs a run's certificate: `certificate.sig` next to it, over the certificate's digest, which covers every field. `graft show` and `graft export` carry the signature along. Signing a certificate that was changed after graft wrote it is refused.
+
+### `graft check-certificate <path>`
+
+The gate for a deploy pipeline. `<path>` is a `certificate.json`, a run folder or an export bundle `.zip`. It exits 0 only when the certificate is untouched, says the rebase passed, and, with `--key`, is signed by one of the keys given.
+
+| Option | Meaning |
+|---|---|
+| `--key <public key>` | A trusted public key: a `.pub` file or its base64 key. Repeatable. Without one the signature is not checked |
+| `--allow-conflict` | Accept a certificate that did not pass |
+
+Checking needs only the standard library, so the core install can run it in CI.
+
 ## Export a verified run
 
 `graft export [target/run] --out graft.zip` writes a portable certificate, manifest and any required adapter or system prompt. Extract the archive before serving. A certified prompt can contain worked examples from captures and the certificate includes model fingerprints. Review the bundle before sharing it.
 
 For vLLM use `graft export --format vllm --base-model MODEL --out serving.zip`. From the extracted directory, run the argument list in `manifest.json` and use its `request_model` in an OpenAI-compatible client. If the bundle includes `system.txt`, append that text to your client’s system message. The manifest also records what the certificate was checked with: `certified_base` (the base model and its revision) and, when the model has `template_args`, the same arguments as `template_args`, in the vLLM command (`--default-chat-template-kwargs`) and as `request_extra_body` for clients. Serve another base, or leave the template arguments out, and the model is not the one that was certified. If your genome uses tools, add your engine's tool-call options yourself (for vLLM, `--enable-auto-tool-choice` and the `--tool-call-parser` for your model). A LoRA export requires PEFT safetensors compatible with your base model. The portable format also supports custom trainer artifacts.
+
+For llama.cpp, LM Studio, Ollama, or Goethe on a Mac, pass `--format gguf --base-model MODEL --llama-cpp DIR`. A trained adapter is merged into the base (this needs `graft-sh[train]`), and the result converted with llama.cpp's own `convert_hf_to_gguf.py` (`pip install gguf`). `--quant` is `Q8_0` by default; `f16` and `bf16` also need no build, and other types such as `Q4_K_M` go through `llama-quantize`. The manifest's `serve_argv` starts `llama-server` with the template arguments (`--chat-template-kwargs`); add `-ngl 999` to use a GPU. The certificate was earned by the unquantized weights, so the manifest says `served_as_certified: false`: serve the file and run `graft verify <model> --against <bundle>` before you trust it.
 
 For a prompt or fast-forward run on Goethe, pass `--format goethe --base-model MODEL`. The manifest records the `goethe load` arguments and request model. Send requests to the operator's configured OpenAI-compatible endpoint, including the exported system text when present.

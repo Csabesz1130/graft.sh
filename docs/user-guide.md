@@ -266,6 +266,34 @@ Runs live under `.graft/`, which `graft init` keeps out of git. Copy a certifica
 
 Check what you deployed the same way the rebase did: `graft verify <model> --graft`.
 
+### Check the deployment, not just the run
+
+The certificate holds for what the rebase checked: the base weights, the graft, the chat template arguments. A
+deployment can differ in ways that change behavior without anyone noticing: a 4-bit GGUF on a laptop, another
+engine, another chat template. Add the deployment to `graft.toml` as a model and check it against the certificate:
+
+```bash
+graft export qwen3 --format gguf --base-model Qwen/Qwen3-8B --quant Q4_K_M --llama-cpp ~/llama.cpp --out q4.zip
+unzip q4.zip -d q4 && (cd q4 && llama-server -m model-Q4_K_M.gguf --jinja --alias grafted \
+    --chat-template-kwargs '{"enable_thinking": false}' --port 8080)     # the manifest's serve_argv
+graft verify laptop --against q4.zip      # [models.laptop] endpoint = "http://127.0.0.1:8080/v1", model = "grafted"
+```
+
+It runs every case the certificate counted and exits 1 if one fails, so the same command gates a new quantization,
+GPU or engine in CI.
+
+### Sign it
+
+```bash
+pip install 'graft-sh[sign]'
+graft keygen                         # once: ~/.config/graft/signing-key.pem and its .pub
+graft sign qwen3                     # certificate.sig, carried into every export
+graft check-certificate q4.zip --key signing-key.pub     # in the deploy pipeline: untouched, passed, signed
+```
+
+The signature covers the certificate's digest, so a pipeline that runs `check-certificate` with your public key only
+deploys bundles that a rebase passed and you signed. Checking needs no extra packages.
+
 ## Recipe: from a hosted model to your own
 
 You do not need an old model of your own to rebase from. Recorded traffic from a hosted model is enough: the recorded replies stand in for the source.

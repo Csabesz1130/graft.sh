@@ -111,9 +111,13 @@ graft check                         # does the model that has the behavior pass 
 graft verify <model>                # run every gate against a model; exit 1 when one fails
 graft rebase --target <model>       # carry the genome onto a new base
 graft show                          # the latest certificate
+graft export --format gguf ...      # one llama.cpp file with the adapter merged in (Mac, CPU, LM Studio, Ollama)
+graft verify <model> --against <run or bundle>   # does this deployment still behave as certified?
+graft keygen && graft sign          # sign the certificate with your Ed25519 key
+graft check-certificate <bundle> --key <public key>   # deploy gate: untouched, passed, signed by a key you trust
 ```
 
-`graft verify` exits non-zero when a gate fails, so it also works as a regression gate in CI for any model or prompt change.
+`graft verify` exits non-zero when a gate fails, so it also works as a regression gate in CI for any model or prompt change. `--against` does the same for the serving side: a quantization, another engine or chat template has to pass every case the certificate counted before it ships.
 
 ## Results on real models
 

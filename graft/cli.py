@@ -123,8 +123,13 @@ def _parser() -> argparse.ArgumentParser:
     exp = sub.add_parser("export", help="bundle a passed rebase for serving")
     exp.add_argument("run", nargs="?", help="a target or target/run; default: latest")
     exp.add_argument("--out", required=True, type=Path, help="new output zip file")
-    exp.add_argument("--format", choices=["portable", "vllm", "goethe"], default="portable")
+    exp.add_argument("--format", choices=["portable", "vllm", "goethe", "gguf"], default="portable",
+                     help="gguf: one llama.cpp file with the adapter merged in (Mac, CPU, LM Studio, Ollama)")
     exp.add_argument("--base-model", help="model id or local path for the serving engine")
+    exp.add_argument("--quant", default="Q8_0", help="gguf only: Q8_0 (default), f16, bf16, or any llama-quantize "
+                                                     "type such as Q4_K_M (needs llama-quantize)")
+    exp.add_argument("--llama-cpp", type=Path, help="gguf only: a llama.cpp checkout or build "
+                                                    "(default: $GRAFT_LLAMA_CPP, then PATH)")
 
     keygen = sub.add_parser("keygen", help="make an Ed25519 key for signing certificates")
     keygen.add_argument("--key", type=Path, help="where to write the private key. default: $GRAFT_SIGNING_KEY, "
@@ -513,7 +518,8 @@ def _show(args: argparse.Namespace) -> int:
 
 def _export(args: argparse.Namespace) -> int:
     try:
-        certified = export.bundle(config.load(), args.run, args.out, args.format, args.base_model)
+        certified = export.bundle(config.load(), args.run, args.out, args.format, args.base_model, args.quant,
+                                  args.llama_cpp)
         if args.base_model and certified and args.base_model not in certified:
             print(f"note: the certificate was checked on {' / '.join(certified)}, not on {args.base_model!r}; "
                   f"it holds only if they are the same weights", file=sys.stderr)
