@@ -246,7 +246,7 @@ class Ladder(ExampleCase):
         code, out, err = graft("show", cwd=moved)
         self.assertEqual(code, 0, out + err)
         code, out, _ = graft("show", "--graft", cwd=moved)
-        self.assertTrue(out.strip().startswith(str(moved)), out)
+        self.assertTrue(out.strip().startswith(str(moved.resolve())), out)   # macOS: /var is /private/var
         code, out, err = graft("verify", "new-base", "--graft", cwd=moved)
         self.assertEqual(code, 0, out + err)
 
