@@ -167,7 +167,7 @@ def _gguf(stage: Path, tmp: Path, kind: str, base_model: str, quant: str, llama_
         merged = tmp / "merged"
         argv = [sys.executable, "-m", "graft.merge_hf", "--base", base_model, "--output", str(merged)]
         if kind == "lora":
-            argv[4:4] = ["--adapter", str(stage / "adapter")]
+            argv += ["--adapter", str(stage / "adapter")]
         _run(argv, "merging the adapter into the base" if kind == "lora" else "fetching the base")
     else:
         merged = local

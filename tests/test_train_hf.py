@@ -247,6 +247,21 @@ class RealRebase(unittest.TestCase):
             code, out, err = graft("verify", "tiny", "--graft", cwd=root)
             self.assertEqual(code, 0, out + err)
 
+            # the trained weights go into a GGUF export (llama.cpp's converter stood in for), merged, not as an adapter
+            from tests.test_export import FAKE_CONVERT
+            (root / "llama.cpp").mkdir()
+            (root / "llama.cpp" / "convert_hf_to_gguf.py").write_text(FAKE_CONVERT)
+            code, out, err = graft("export", "--format", "gguf", "--base-model", "base", "--llama-cpp", "llama.cpp",
+                                   "--out", "tiny.zip", cwd=root)
+            self.assertEqual(code, 0, out + err)
+            from zipfile import ZipFile
+            with ZipFile(root / "tiny.zip") as z:
+                self.assertNotIn("adapter/config.json", z.namelist())
+                manifest = json.loads(z.read("manifest.json"))
+                converted = json.loads(z.read("model-Q8_0.gguf"))
+            self.assertTrue(manifest["gguf"]["adapter_merged"])
+            self.assertTrue(converted["from"].endswith("merged"), "converted from the merged weights")
+
 
 if __name__ == "__main__":
     unittest.main()
