@@ -2,11 +2,14 @@ import json
 import sys
 import threading
 import unittest
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 from graft import runners
 from graft.genome import Unit
+from tests.support import mock_module
+
+Server = mock_module().Server   # an HTTP server that skips the slow host-name lookup on macOS
 
 
 class Scripted(BaseHTTPRequestHandler):
@@ -35,7 +38,7 @@ def completion(message):
 class OpenAIRunner(unittest.TestCase):
     def setUp(self):
         Scripted.queue, Scripted.seen = [], []
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Scripted)
+        self.server = Server(("127.0.0.1", 0), Scripted)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)

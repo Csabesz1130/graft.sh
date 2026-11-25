@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import re
+import socketserver
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -162,9 +163,17 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": {"message": "not found"}})
 
 
+class Server(ThreadingHTTPServer):
+    def server_bind(self) -> None:
+        # HTTPServer.server_bind looks up the host's full name, which can take half a minute on a Mac; the name is
+        # never used here
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "127.0.0.1", self.server_address[1]
+
+
 def serve(port: int = 8811) -> ThreadingHTTPServer:
     Handler.adapters = {}
-    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    return Server(("127.0.0.1", port), Handler)
 
 
 if __name__ == "__main__":
