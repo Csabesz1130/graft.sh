@@ -159,6 +159,15 @@ Rebased onto Qwen3-8B with no source model (22 minutes on one 24 GB A10G): 61 of
 
 A model served by vLLM from a `graft export` bundle of the certified Qwen3-8B run was checked through its OpenAI-compatible endpoint five times, over three server starts: four passes gave 58 of the 58 certified cases, one gave 57 (a held-out legal case). Served replies are not exactly repeatable from one server start to the next.
 
+The same certified run was exported with `graft export --format gguf` (the adapter merged into Qwen3-8B, then llama.cpp's own converter and quantizer at commit `79c69f4`), served by `llama-server` from the bundle's `serve_argv` on one L4, and checked with `graft verify served --against <bundle>`, three passes per setting:
+
+| GGUF | Bundle size | 4 requests at a time | 1 at a time |
+|---|---|---|---|
+| Q8_0 | 8.1 GiB | 58, 57, 57 | 58, 57, 57 |
+| Q4_K_M | 4.7 GiB | 58, 57, 58 | 58, 58, 58 |
+
+The 4-bit file did not do worse than the 8-bit one. What failed were two held-out cases, each in some passes and not others: Q8_0 answered a request for a free replacement stove with "Thanks. I've noted your request..." instead of declining to give legal advice, and Q4_K_M once acknowledged an account closure without calling `close_account`. The same file on the same server is not always the same model, so check a deployment more than once: `graft verify <model> --against <bundle> --passes 3` fails if any certified case fails in any pass.
+
 ## Known limits
 
 This is version 0.1.

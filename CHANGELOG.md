@@ -8,10 +8,13 @@
 - Added TRADEMARKS.md, a contributor license agreement (CLA.md) with a CLA check on pull requests, and CONTRIBUTING.md.
 - `graft capture` derives structured checks by default: tool names, order and count, numbers, ids and codes, enum values and values copied from the request are pinned; other strings only have to be non-empty; a JSON-only reply must stay JSON-only. `--checks exact` keeps 0.1's behaviour. The summary line counts the loosened values.
 - `graft log` shows the score of the round a run kept, not of its last round (they differ when a later lora round did worse). Runs record the stage of their graft; for older runs it is read from the adapter path.
-- `graft verify <model> --against <run|certificate|bundle>`: checks a deployment (another engine, a quantization, a served or merged adapter) on every case the certificate counted, and fails if one fails now.
+- `graft verify <model> --against <run|certificate|bundle>`: checks a deployment (another engine, a quantization, a served or merged adapter) on every case the certificate counted, and fails if one fails now. `--passes N` repeats it and fails if a case fails in any pass.
 - `graft export --format gguf`: merges a trained adapter into its base and converts it with llama.cpp's tools (`--quant`, `--llama-cpp`), for llama.cpp, LM Studio, Ollama or Goethe on a Mac. The manifest asks for `graft verify --against` before the file is trusted.
 - `graft keygen`, `graft sign` and `graft check-certificate`: Ed25519 signatures over the certificate digest, carried in export bundles, and a deploy gate that checks a certificate is untouched, passed and signed by a trusted key. Checking needs only the standard library; signing needs `graft-sh[sign]`.
 - `python -m graft.merge_hf`: fold an adapter into its base as a plain Hugging Face model.
+- README: the certified Qwen3-8B run as Q8_0 and Q4_K_M GGUF files on llama.cpp, checked with `verify --against` (`scripts/modal_gguf.py`).
+- CI runs the install, unit tests and demo on macOS (Apple Silicon). The demo server no longer waits 35 s for a host-name lookup on a Mac.
+- A release workflow builds the wheel and sdist, writes SHA256SUMS and attests them with GitHub build provenance.
 
 ## 0.1.1
 

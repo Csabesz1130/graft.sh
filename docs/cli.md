@@ -106,7 +106,7 @@ Use it in CI to gate any change to a model, a prompt or the serving stack.
 
 Checks a deployment against a certificate: a run (`target/run`), a `certificate.json` or an export bundle `.zip`. It runs the cases the certificate counted as passing, sends the certified prompt graft if there is one (a trained adapter is the server's part: served, merged, or quantized into a GGUF), and exits 1 if any of them fails now. Use it whenever the serving side changes: another engine, a quantization, a chat template, a GPU.
 
-The genome must be the one the certificate checked; `--graft` and `--rule` cannot be combined with it. `--json` reports `certified_cases`, `passed`, `ok` and every failure with its reply.
+`--passes N` runs every case N times and fails if any case fails in any pass, with how often each failed: engines are not always deterministic, even at temperature 0 (on llama.cpp the same GGUF scored 58, 57 and 57 of 58 in three passes). The genome must be the one the certificate checked; `--graft` and `--rule` cannot be combined with it. `--json` reports `certified_cases`, `passes` (each pass's score), `passed` (the lowest), `ok` and every failure with its reply and `failed_in`.
 
 ### `graft models`
 

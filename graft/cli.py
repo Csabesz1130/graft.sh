@@ -97,6 +97,9 @@ def _parser() -> argparse.ArgumentParser:
                         help="check a deployment against a certificate: a run (target/run), a certificate.json or "
                              "an export bundle. Runs the cases it certified, sends its prompt graft if it has one "
                              "(a served adapter is the server's part), and fails if any of them fails now")
+    verify.add_argument("--passes", type=int, default=1, metavar="N",
+                        help="with --against: run every case N times and fail if any case fails in any pass. "
+                             "Engines are not always deterministic, even at temperature 0")
     verify.add_argument("--json", action="store_true")
 
     rb = sub.add_parser("rebase", help="carry the genome onto a new base model")
@@ -391,26 +394,42 @@ def _verify_against(args: argparse.Namespace, project: config.Project, found: ge
     sent = graft if cert["graft"]["kind"] == "prompt" else {"kind": "none"}
     left_out = {e["case"] for e in cert.get("excluded", [])} | {f["case"] for f in cert.get("failures", [])}
     cases = [c for c in found.cases if c.id not in left_out]
+    if args.passes < 1:
+        raise rebase.RebaseError("--passes must be 1 or more")
     runner = runners.build(args.model, project.model(args.model), project.root)
-    results = evaluate.evaluate(cases, runner, sent, project.root, _tick("verify", len(cases)))
-    errors = [r for r in results.values() if r.error]
-    if errors:
-        raise runners.RunnerError(f"{len(errors)} of {len(results)} requests to {args.model} failed: "
-                                  f"{errors[0].problems[0]}")
-    lost = [r for r in results.values() if not r.ok]
+    scores, failed_in = [], {}
+    for number in range(1, args.passes + 1):
+        label = "verify" if args.passes == 1 else f"verify {number}/{args.passes}"
+        results = evaluate.evaluate(cases, runner, sent, project.root, _tick(label, len(cases)))
+        errors = [r for r in results.values() if r.error]
+        if errors:
+            raise runners.RunnerError(f"{len(errors)} of {len(results)} requests to {args.model} failed: "
+                                      f"{errors[0].problems[0]}")
+        bad = [r for r in results.values() if not r.ok]
+        scores.append(len(cases) - len(bad))
+        for result in bad:
+            failed_in.setdefault(result.case, [0, result])[0] += 1
+    lost = [result for _, result in failed_in.values()]
     if args.json:
         print(json.dumps({"genome": found.id, "model": args.model, "certificate_digest": cert["digest"],
-                          "certified_cases": len(cases), "passed": len(cases) - len(lost), "ok": not lost,
-                          "failures": [r.to_json() for r in lost]}, indent=2))
+                          "certified_cases": len(cases), "passes": scores, "passed": min(scores),
+                          "ok": not lost,
+                          "failures": [{**result.to_json(), "failed_in": count}
+                                       for count, result in failed_in.values()]}, indent=2))
         return 0 if not lost else 1
     print(f"{args.model} against the certificate of {cert['target']['name']}/{cert['run']} "
           f"(genome {found.id[:8]}, {cert['graft']['kind']} graft)")
-    for result in lost[:20]:
-        print(f"  FAILS  {result.rule}/{result.case} [{result.split}]: "
+    for count, result in list(failed_in.values())[:20]:
+        times = "" if args.passes == 1 else f" ({count} of {args.passes} passes)"
+        print(f"  FAILS  {result.rule}/{result.case} [{result.split}]{times}: "
               f"{result.problems[0] if result.problems else 'failed'}")
     if len(lost) > 20:
         print(f"  ... and {len(lost) - 20} more (--json lists every one)")
-    print(f"\n{len(cases) - len(lost)}/{len(cases)} of the certified cases pass on {args.model}.")
+    if args.passes == 1:
+        print(f"\n{scores[0]}/{len(cases)} of the certified cases pass on {args.model}.")
+    else:
+        print(f"\npasses: {', '.join(f'{n}/{len(cases)}' for n in scores)}. "
+              f"{len(cases) - len(lost)}/{len(cases)} of the certified cases pass in every one.")
     if lost:
         print("This deployment does not behave as certified: a different quantization, server, chat template or "
               "sampling setting changed what the model does.")

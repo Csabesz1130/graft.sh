@@ -26,6 +26,17 @@ class VerifyAgainst(ExampleCase):
         self.assertEqual(code, 1)
         self.assertIn('"ok": false', out)
 
+        # several passes: every case has to hold in each one, and the failures say how often they failed
+        code, out, err = self.graft("verify", "served", "--against", "new-base", "--passes", "2")
+        self.assertEqual(code, 0, out + err)
+        self.assertRegex(out, r"passes: (\d+)/(\d+), \1/\2\. \1/\2 of the certified cases pass in every one")
+        code, out, _ = self.graft("verify", "new-base", "--against", "new-base", "--passes", "2", "--json")
+        self.assertEqual(code, 1)
+        report = __import__("json").loads(out)
+        self.assertEqual(len(report["passes"]), 2)
+        self.assertTrue(all(f["failed_in"] == 2 for f in report["failures"] if f["rule"] != "account-closure"))
+        self.assertEqual(self.graft("verify", "served", "--against", "new-base", "--passes", "0")[0], 1)
+
     def test_a_prompt_graft_is_sent_by_the_client(self):
         # without the one rule the stand-in only learns by training, the prompt rung is enough
         for part in ("rules/account-closure.toml", "cases/account-closure.jsonl"):
