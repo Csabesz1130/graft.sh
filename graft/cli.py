@@ -8,12 +8,24 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from graft import __version__, capture, certificate, config, evaluate, export, genome, rebase, runners, verifiers
+from graft import (
+    __version__,
+    capture,
+    certificate,
+    config,
+    evaluate,
+    export,
+    genome,
+    rebase,
+    runners,
+    signing,
+    verifiers,
+)
 from graft.evaluate import CaseResult
 
 PROG = "graft"
 ERRORS = (config.ConfigError, genome.GenomeError, runners.RunnerError, verifiers.VerifierError,
-          rebase.RebaseError, capture.CaptureError)
+          rebase.RebaseError, capture.CaptureError, signing.SigningError)
 
 
 def _rule_id(value: str) -> str:
@@ -81,6 +93,10 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("--graft", metavar="RUN", nargs="?", const="",
                         help="apply the graft of a rebase (default: the latest one)")
     verify.add_argument("--rule", action="append", default=[], help="only this rule. repeatable")
+    verify.add_argument("--against", metavar="CERTIFIED",
+                        help="check a deployment against a certificate: a run (target/run), a certificate.json or "
+                             "an export bundle. Runs the cases it certified, sends its prompt graft if it has one "
+                             "(a served adapter is the server's part), and fails if any of them fails now")
     verify.add_argument("--json", action="store_true")
 
     rb = sub.add_parser("rebase", help="carry the genome onto a new base model")
@@ -109,6 +125,22 @@ def _parser() -> argparse.ArgumentParser:
     exp.add_argument("--out", required=True, type=Path, help="new output zip file")
     exp.add_argument("--format", choices=["portable", "vllm", "goethe"], default="portable")
     exp.add_argument("--base-model", help="model id or local path for the serving engine")
+
+    keygen = sub.add_parser("keygen", help="make an Ed25519 key for signing certificates")
+    keygen.add_argument("--key", type=Path, help="where to write the private key. default: $GRAFT_SIGNING_KEY, "
+                                                 "else ~/.config/graft/signing-key.pem")
+
+    sign = sub.add_parser("sign", help="sign a rebase's certificate with your key")
+    sign.add_argument("run", nargs="?", help="a target, or target/run. default: the latest rebase")
+    sign.add_argument("--key", type=Path, help="the private key. default as for keygen")
+
+    chk = sub.add_parser("check-certificate", help="check a certificate (or export bundle) before deploying it: "
+                                                   "untouched, passed, and signed by a key you trust")
+    chk.add_argument("path", type=Path, help="a certificate.json, a run folder, or an export bundle .zip")
+    chk.add_argument("--key", action="append", default=[], metavar="PUBLIC_KEY",
+                     help="a trusted public key: a .pub file or its base64 key. repeatable. "
+                          "with none, the signature is not checked")
+    chk.add_argument("--allow-conflict", action="store_true", help="accept a certificate that did not pass")
 
     models = sub.add_parser("models", help="the models in graft.toml, and whether each answers")
     models.add_argument("--json", action="store_true")
@@ -271,6 +303,11 @@ def _check(args: argparse.Namespace) -> int:
 def _verify(args: argparse.Namespace) -> int:
     project = config.load()
     found = _load(project)
+    if args.against:
+        if args.graft is not None or args.rule:
+            raise rebase.RebaseError("--against takes the graft and the cases from the certificate; "
+                                     "leave out --graft and --rule")
+        return _verify_against(args, project, found)
     graft: dict[str, Any] = {"kind": "none"}
     if args.graft is not None:
         state = rebase.find_run(project, args.graft or None, for_graft=True)
@@ -305,6 +342,76 @@ def _verify(args: argparse.Namespace) -> int:
     print(f"\n{sums['passed']}/{sums['total']} cases pass; {sums['rules_ok']} of {sums['rules']} rules hold."
           + (f" Held out: {held['passed']}/{held['total']}." if held["total"] else ""))
     return 0 if ok else 1
+
+
+def _certified(project: config.Project, value: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The certificate and the graft named by a run, a certificate file, a run folder or an export bundle."""
+    import zipfile
+    path = Path(value)
+    try:
+        if path.suffix == ".zip" and path.is_file():
+            with zipfile.ZipFile(path) as bundle:
+                cert = json.loads(bundle.read("certificate.json"))
+                graft = json.loads(bundle.read("manifest.json")).get("graft") or {}
+                if graft.get("kind") == "prompt" and "system.txt" in bundle.namelist():
+                    graft["system"] = bundle.read("system.txt").decode("utf-8")
+        elif path.is_file() or path.is_dir():
+            cert_path = path / "certificate.json" if path.is_dir() else path
+            cert = json.loads(cert_path.read_text(encoding="utf-8"))
+            graft_path = cert_path.with_name("graft.json")
+            graft = json.loads(graft_path.read_text(encoding="utf-8")) if graft_path.is_file() else {}
+        else:
+            state = rebase.find_run(project, value, for_graft=True)
+            folder = rebase.run_dir_of(project, state)
+            cert = json.loads((folder / "certificate.json").read_text(encoding="utf-8"))
+            graft = state["graft"]
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile) as err:
+        raise rebase.RebaseError(f"could not read a certificate from {value}: {err}") from None
+    if not certificate.intact(cert):
+        raise rebase.RebaseError(f"the certificate in {value} was changed after graft wrote it")
+    if graft and genome.digest({k: v for k, v in graft.items() if k != "adapter"}) != cert["graft"]["sha256"]:
+        raise rebase.RebaseError(f"the graft in {value} is not the one its certificate describes")
+    return cert, graft
+
+
+def _verify_against(args: argparse.Namespace, project: config.Project, found: genome.Genome) -> int:
+    cert, graft = _certified(project, args.against)
+    if cert["genome"]["id"] != found.id:
+        raise genome.GenomeError(f"the genome changed since this certificate (it checked {cert['genome']['id'][:8]}, "
+                                 f"the genome here is {found.id[:8]}); check out the genome it certified")
+    if cert["graft"]["kind"] == "prompt" and not graft.get("system"):
+        raise rebase.RebaseError("the certified graft is a prompt, and its text is not in what was given")
+    # The deployment is the served weights (an adapter is loaded or merged by the server) plus what the client
+    # sends: a prompt graft is the client's part, so it is sent here too.
+    sent = graft if cert["graft"]["kind"] == "prompt" else {"kind": "none"}
+    left_out = {e["case"] for e in cert.get("excluded", [])} | {f["case"] for f in cert.get("failures", [])}
+    cases = [c for c in found.cases if c.id not in left_out]
+    runner = runners.build(args.model, project.model(args.model), project.root)
+    results = evaluate.evaluate(cases, runner, sent, project.root, _tick("verify", len(cases)))
+    errors = [r for r in results.values() if r.error]
+    if errors:
+        raise runners.RunnerError(f"{len(errors)} of {len(results)} requests to {args.model} failed: "
+                                  f"{errors[0].problems[0]}")
+    lost = [r for r in results.values() if not r.ok]
+    if args.json:
+        print(json.dumps({"genome": found.id, "model": args.model, "certificate_digest": cert["digest"],
+                          "certified_cases": len(cases), "passed": len(cases) - len(lost), "ok": not lost,
+                          "failures": [r.to_json() for r in lost]}, indent=2))
+        return 0 if not lost else 1
+    print(f"{args.model} against the certificate of {cert['target']['name']}/{cert['run']} "
+          f"(genome {found.id[:8]}, {cert['graft']['kind']} graft)")
+    for result in lost[:20]:
+        print(f"  FAILS  {result.rule}/{result.case} [{result.split}]: "
+              f"{result.problems[0] if result.problems else 'failed'}")
+    if len(lost) > 20:
+        print(f"  ... and {len(lost) - 20} more (--json lists every one)")
+    print(f"\n{len(cases) - len(lost)}/{len(cases)} of the certified cases pass on {args.model}.")
+    if lost:
+        print("This deployment does not behave as certified: a different quantization, server, chat template or "
+              "sampling setting changed what the model does.")
+        return 1
+    print("The deployment behaves as certified.")
+    return 0
 
 
 def _rebase(args: argparse.Namespace) -> int:
@@ -396,6 +503,11 @@ def _show(args: argparse.Namespace) -> int:
     if problem:
         print(f"\nWARNING: {problem}. This certificate does not describe what is on disk now.", file=sys.stderr)
         return 1
+    sig = signing.load_signature(path.with_name(signing.NAME))
+    if sig is not None and not args.json:
+        mark = "" if sig.get("certificate_digest") == cert.get("digest") else " (for another certificate: sign again)"
+        print(f"\nSigned by {sig.get('key_id')}{mark}. Check it with "
+              f"`graft check-certificate {path} --key <public key>`.")
     return 0
 
 
@@ -441,8 +553,69 @@ def _models(args: argparse.Namespace) -> int:
     return 0 if all(r["ok"] for r in rows) else 1
 
 
+def _keygen(args: argparse.Namespace) -> int:
+    path = (args.key or signing.default_key()).expanduser()
+    public = signing.keygen(path)
+    print(f"private key  {path}   (keep it secret; graft never copies it)")
+    print(f"public key   {path.with_suffix('.pub')}")
+    print(signing.public_line(public))
+    return 0
+
+
+def _sign(args: argparse.Namespace) -> int:
+    project = config.load()
+    state = rebase.find_run(project, args.run)
+    folder = rebase.run_dir_of(project, state)
+    path = folder / "certificate.json"
+    if not path.is_file():
+        raise signing.SigningError(f"{state['target']}/{state['run']} is {state['status']}; it has no certificate")
+    cert = json.loads(path.read_text(encoding="utf-8"))
+    sig = signing.sign(cert, (args.key or signing.default_key()).expanduser())
+    (folder / signing.NAME).write_text(json.dumps(sig, indent=2) + "\n", encoding="utf-8")
+    verdict = "passed" if cert.get("passed") else "did NOT pass"
+    print(f"signed {state['target']}/{state['run']} ({verdict}) with {sig['key_id']}")
+    print(folder / signing.NAME)
+    return 0
+
+
+def _check_certificate(args: argparse.Namespace) -> int:
+    import zipfile
+    try:
+        if args.path.suffix == ".zip":
+            with zipfile.ZipFile(args.path) as bundle:
+                names = set(bundle.namelist())
+                cert = json.loads(bundle.read("certificate.json"))
+                sig = json.loads(bundle.read(signing.NAME)) if signing.NAME in names else None
+        else:
+            path = args.path / "certificate.json" if args.path.is_dir() else args.path
+            cert = json.loads(path.read_text(encoding="utf-8"))
+            sig = signing.load_signature(path.with_name(signing.NAME))
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile) as err:
+        raise signing.SigningError(f"could not read a certificate from {args.path}: {err}") from None
+    if not isinstance(cert, dict):
+        raise signing.SigningError(f"{args.path} is not a graft certificate")
+    trusted = [signing.read_public(k) for k in args.key]
+    found = signing.problems(cert, sig, trusted)
+    if not cert.get("passed") and not args.allow_conflict:
+        found.append(f"the rebase did not pass (outcome: {cert.get('outcome')})")
+    totals = cert.get("totals") or {}
+    print(f"certificate  {(cert.get('source') or {}).get('name')} onto {(cert.get('target') or {}).get('name')}, "
+          f"run {cert.get('run')}, {totals.get('passed')}/{totals.get('total')} cases, "
+          f"genome {str((cert.get('genome') or {}).get('id'))[:12]}")
+    if trusted and sig and not found:
+        print(f"signed by    {sig.get('key_id')} (trusted)")
+    elif not trusted:
+        print("signature    not checked: pass --key with a public key you trust" if sig is not None
+              else "signature    none")
+    for problem in found:
+        print(f"FAIL         {problem}")
+    print("OK" if not found else "REJECTED")
+    return 0 if not found else 1
+
+
 COMMANDS = {"init": _init, "status": _status, "rule": _rule, "capture": _capture, "check": _check,
-            "verify": _verify, "rebase": _rebase, "log": _log, "show": _show, "models": _models, "export": _export}
+            "verify": _verify, "rebase": _rebase, "log": _log, "show": _show, "models": _models, "export": _export,
+            "keygen": _keygen, "sign": _sign, "check-certificate": _check_certificate}
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -14,6 +14,7 @@ dynamic = ["version"]
 dependencies = []          # the core is standard library only
 
 [project.optional-dependencies]
+sign = ["cryptography>=42"]
 train = ["torch>=2.2", "transformers>=4.45", "peft>=0.12", "accelerate>=0.30"]
 
 [project.scripts]

@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from zipfile import ZipFile
 
-from graft import certificate, genome, rebase
+from graft import certificate, genome, rebase, signing
 from graft.config import Project
 
 
@@ -37,6 +37,11 @@ def bundle(project: Project, run: str | None, output: Path, target_format: str,
         stage = Path(tmp) / "bundle"
         stage.mkdir()
         (stage / "certificate.json").write_bytes(cert_bytes)
+        sig = signing.load_signature(folder / signing.NAME)
+        if sig is not None:
+            if sig.get("certificate_digest") != cert["digest"]:
+                raise rebase.RebaseError(f"{signing.NAME} in the run signs another certificate; sign it again")
+            (stage / signing.NAME).write_text(json.dumps(sig, indent=2) + "\n", encoding="utf-8")
         portable = dict(graft)
         if kind == "lora":
             source = rebase.adapter_path(project.root, graft)
@@ -53,6 +58,8 @@ def bundle(project: Project, run: str | None, output: Path, target_format: str,
             (stage / "system.txt").write_text(graft["system"], encoding="utf-8")
         manifest = {"format_version": 1, "kind": kind, "certificate_digest": cert["digest"],
                     "target": cert["target"]["name"], "graft": portable}
+        if sig is not None:
+            manifest["signed_by"] = sig.get("key_id")
         # What the certificate was checked with besides the graft: the exact base, and the chat template arguments
         # (Qwen3's enable_thinking, for one). Served without them, the model is not the one that was certified.
         fingerprint = cert["target"].get("fingerprint") or {}
