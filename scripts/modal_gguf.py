@@ -5,7 +5,7 @@
 2. serve_and_verify (L4): llama-server from the official llama.cpp CUDA image, started with the bundle's serve_argv,
    then `graft verify served --against <bundle>` three times.
 
-    modal run --detach scripts/modal_gguf.py [--quants Q8_0,Q4_K_M] [--parallel 4]
+    modal run --detach scripts/modal_gguf.py [--quants Q8_0,Q4_K_M] [--parallel 4] [--cache warm,restart,off]
 """
 from pathlib import Path
 
@@ -72,7 +72,10 @@ def export(project: str, target: str, base_model: str, quants: list[str]) -> lis
 
 
 @app.function(image=serve_image, gpu="L4", volumes={"/runs": runs}, timeout=2 * 3600, retries=0)
-def serve_and_verify(project: str, bundle_path: str, tool_check_passes: int = 3, parallel: int = 4) -> dict:
+def serve_and_verify(project: str, bundle_path: str, tool_check_passes: int = 3, parallel: int = 4,
+                     cache: str = "warm") -> dict:
+    """cache: warm (one server, llama-server's prompt cache on, as served by default), restart (a fresh server
+    for every pass) or off (one server, every request sent with cache_prompt=false)."""
     import json
     import shutil
     import subprocess
@@ -89,57 +92,75 @@ def serve_and_verify(project: str, bundle_path: str, tool_check_passes: int = 3,
     manifest = json.loads((bundle / "manifest.json").read_text())
     argv = ["/app/llama-server", *manifest["serve_argv"][1:], "--host", "127.0.0.1", "--port", "8000",
             "-ngl", "999", "-c", str(8192 * parallel), "--parallel", str(parallel), "--temp", "0"]
-    print("serving:", " ".join(argv), flush=True)
-    log = open(work / "server.log", "w")
-    server = subprocess.Popen(argv, cwd=bundle, stdout=log, stderr=subprocess.STDOUT)
-    for _ in range(360):
-        try:
-            urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3).close()
-            break
-        except OSError:
-            if server.poll() is not None:
-                return {"bundle": bundle_path, "error": "server exited",
-                        "log": (work / "server.log").read_text()[-3000:]}
-            time.sleep(5)
-    else:
+    print("serving:", " ".join(argv), f"(cache: {cache})", flush=True)
+
+    def start():
+        log = open(work / "server.log", "w")
+        server = subprocess.Popen(argv, cwd=bundle, stdout=log, stderr=subprocess.STDOUT)
+        for _ in range(360):
+            try:
+                urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3).close()
+                return server, None
+            except OSError:
+                if server.poll() is not None:
+                    return None, "server exited: " + (work / "server.log").read_text()[-3000:]
+                time.sleep(5)
         server.kill()
-        return {"bundle": bundle_path, "error": "server did not come up",
-                "log": (work / "server.log").read_text()[-3000:]}
+        return None, "server did not come up: " + (work / "server.log").read_text()[-3000:]
+
+    def stop(server):
+        server.terminate()
+        try:
+            server.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait()
+
     # an ordinary OpenAI client: no adapter, no template arguments; the bundle's serve_argv carries them
+    extra = ", cache_prompt = false" if cache == "off" else ""
     with open(proj / "graft.toml", "a") as out:
         out.write('\n[models.served]\nendpoint = "http://127.0.0.1:8000/v1"\nmodel = "grafted"\n'
-                  f'params = {{ max_tokens = 256 }}\nconcurrency = {parallel}\n')
+                  f'params = {{ max_tokens = 256{extra} }}\nconcurrency = {parallel}\n')
+    server, problem = start()
+    if problem:
+        return {"bundle": bundle_path, "cache": cache, "error": problem}
     passes = []
     for attempt in range(1, tool_check_passes + 1):
+        if cache == "restart" and attempt > 1:
+            stop(server)
+            server, problem = start()
+            if problem:
+                return {"bundle": bundle_path, "cache": cache, "error": problem, "passes": passes}
         done = subprocess.run([sys.executable, "-m", "graft", "verify", "served", "--against", str(bundle_path),
                                "--json"], cwd=proj, capture_output=True, text=True)
         try:
             report = json.loads(done.stdout)
         except json.JSONDecodeError:
-            server.terminate()
-            return {"bundle": bundle_path, "error": "verify failed", "stdout": done.stdout[-2000:],
+            stop(server)
+            return {"bundle": bundle_path, "cache": cache, "error": "verify failed", "stdout": done.stdout[-2000:],
                     "stderr": done.stderr[-2000:]}
         passes.append({"passed": report["passed"], "of": report["certified_cases"],
                        "failures": [{"case": f["case"], "rule": f.get("rule"), "split": f.get("split"),
                                      "problem": (f.get("problems") or ["?"])[0],
                                      "reply": json.dumps((f.get("replies") or [{}])[0])[:300]}
                                     for f in report["failures"]]})
-        print(f"{Path(bundle_path).name} pass {attempt}: {report['passed']}/{report['certified_cases']}", flush=True)
+        print(f"{Path(bundle_path).name} cache={cache} pass {attempt}: "
+              f"{report['passed']}/{report['certified_cases']}", flush=True)
         for f in passes[-1]["failures"]:
             print(f"   FAIL {f['rule']}/{f['case']} [{f['split']}]: {f['problem']}\n        {f['reply']}", flush=True)
-    server.terminate()
-    return {"bundle": bundle_path, "gguf": manifest["gguf"], "passes": passes}
+    stop(server)
+    return {"bundle": bundle_path, "gguf": manifest["gguf"], "cache": cache, "parallel": parallel, "passes": passes}
 
 
 @app.local_entrypoint()
 def main(project: str = "/runs/qwen3-8b", target: str = "qwen3", base_model: str = "Qwen/Qwen3-8B",
-         quants: str = "Q8_0,Q4_K_M", parallel: int = 4):
+         quants: str = "Q8_0,Q4_K_M", parallel: int = 4, cache: str = "warm", passes: int = 3):
     import json
     bundles = export.remote(project, target, base_model, quants.split(","))
     print("bundles:", bundles)
-    results = list(serve_and_verify.map([project] * len(bundles), bundles, [3] * len(bundles),
-                                        [parallel] * len(bundles)))
-    for r in results:
-        r["parallel"] = parallel
+    modes = cache.split(",")
+    jobs = [(b, m) for b in bundles for m in modes]
+    results = list(serve_and_verify.map([project] * len(jobs), [b for b, _ in jobs], [passes] * len(jobs),
+                                        [parallel] * len(jobs), [m for _, m in jobs]))
     print(json.dumps(results, indent=2))
-    Path(f"modal_gguf_results_p{parallel}.json").write_text(json.dumps(results, indent=2))
+    Path(f"modal_gguf_results_p{parallel}_{cache.replace(',', '-')}.json").write_text(json.dumps(results, indent=2))

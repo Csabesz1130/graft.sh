@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0
 
 - The license is now the Functional Source License, Version 1.1, ALv2 Future License (FSL-1.1-ALv2). Each version
   becomes Apache-2.0 two years after its release; 0.1.1 and earlier stay Apache-2.0. The README explains in plain
