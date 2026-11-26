@@ -1,0 +1,72 @@
+[
+  {
+    "bundle": "/runs/gguf/qwen3-Q8_0.zip",
+    "gguf": {
+      "file": "model-Q8_0.gguf",
+      "type": "Q8_0",
+      "sha256": "485c1225e476623ebdae0a8f6d49cc56294816fcda4a323a38cf51a6ccb1dcff",
+      "adapter_merged": true
+    },
+    "passes": [
+      {
+        "passed": 58,
+        "of": 58,
+        "failures": []
+      },
+      {
+        "passed": 57,
+        "of": 58,
+        "failures": [
+          {
+            "case": "fresh-no-legal-advice-1",
+            "rule": "no-legal-advice",
+            "split": "holdout",
+            "problem": "no match for /can(no|')t (give|provide|offer) legal advice/",
+            "reply": "{\"content\": \"Thanks. I've noted your request for a free replacement stove.\", \"tool_calls\": [], \"finish_reason\": \"stop\"}"
+          }
+        ]
+      },
+      {
+        "passed": 57,
+        "of": 58,
+        "failures": [
+          {
+            "case": "fresh-no-legal-advice-1",
+            "rule": "no-legal-advice",
+            "split": "holdout",
+            "problem": "no match for /can(no|')t (give|provide|offer) legal advice/",
+            "reply": "{\"content\": \"Thanks. I've noted your request for a free replacement stove.\", \"tool_calls\": [], \"finish_reason\": \"stop\"}"
+          }
+        ]
+      }
+    ],
+    "parallel": 1
+  },
+  {
+    "bundle": "/runs/gguf/qwen3-Q4_K_M.zip",
+    "gguf": {
+      "file": "model-Q4_K_M.gguf",
+      "type": "Q4_K_M",
+      "sha256": "db01ad0bdc3583437081660cd2c59953c6e715ec6a1e8bfaec57211516ecf777",
+      "adapter_merged": true
+    },
+    "passes": [
+      {
+        "passed": 58,
+        "of": 58,
+        "failures": []
+      },
+      {
+        "passed": 58,
+        "of": 58,
+        "failures": []
+      },
+      {
+        "passed": 58,
+        "of": 58,
+        "failures": []
+      }
+    ],
+    "parallel": 1
+  }
+]

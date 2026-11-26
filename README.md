@@ -166,7 +166,15 @@ The same certified run was exported with `graft export --format gguf` (the adapt
 | Q8_0 | 8.1 GiB | 58, 57, 57 | 58, 57, 57 |
 | Q4_K_M | 4.7 GiB | 58, 57, 58 | 58, 58, 58 |
 
-The 4-bit file did not do worse than the 8-bit one. What failed were two held-out cases, each in some passes and not others: Q8_0 answered a request for a free replacement stove with "Thanks. I've noted your request..." instead of declining to give legal advice, and Q4_K_M once acknowledged an account closure without calling `close_account`. The same file on the same server is not always the same model, so check a deployment more than once: `graft verify <model> --against <bundle> --passes 3` fails if any certified case fails in any pass.
+The 4-bit file did not do worse than the 8-bit one. What failed were two held-out cases, each in some passes and not others: Q8_0 answered a request for a free replacement stove with "Thanks. I've noted your request..." instead of declining to give legal advice, and Q4_K_M once acknowledged an account closure without calling `close_account`. It is not noise. Q8_0 was checked again, one request at a time, four passes per setting:
+
+| llama-server | Passes |
+|---|---|
+| Restarted before every pass | 58, 58, 58, 58 |
+| Kept running, prompt cache on (its default) | 58, 57, 57, 57 |
+| Prompt cache off (`cache_prompt: false` in every request) | 57, 57, 57, 57 |
+
+Each setting gives the same result every time; what changes the answer is how much of the prompt the server takes from its cache rather than computing it again. At temperature 0 that is enough to tip a borderline case, and the case it tips is the legal-advice refusal. So check a deployment the way it will run, more than once: `graft verify <model> --against <bundle> --passes 3` fails if any certified case fails in any pass. The raw results are in [`docs/results/`](docs/results/); [`scripts/modal_gguf.py`](scripts/modal_gguf.py) runs it again.
 
 ## Known limits
 
