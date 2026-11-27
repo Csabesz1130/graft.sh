@@ -210,6 +210,7 @@ def run(project: Project, argv: list[str], gpu: str | None, models: list[str]) -
     image = (modal.Image.debian_slim(python_version=f"{sys.version_info.major}.{sys.version_info.minor}")
              .pip_install(*opts["packages"])
              .env({"HF_HOME": "/cache/hf", "PYTHONUNBUFFERED": "1", "TOKENIZERS_PARALLELISM": "false",
+                   "HF_HUB_DISABLE_PROGRESS_BARS": "1",
                    "HF_HUB_DISABLE_TELEMETRY": "1"})
              .add_local_python_source("graft"))
     app = modal.App("graft-rebase")
