@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+- `graft rebase --runner modal [--gpu L4]`: runs the rebase on a Modal GPU from any machine with the Modal client,
+  streams its output, and brings what it changed under `.graft` back, so `show`, `verify`, `export` and `--continue`
+  work locally. Every run folder is kept whole on the Modal volume `graft-runs`. `[modal]` sets the GPU, secrets,
+  timeout and packages. Needs `graft-sh[modal]`.
+
 ## 0.2.0
 
 - The license is now the Functional Source License, Version 1.1, ALv2 Future License (FSL-1.1-ALv2). Each version

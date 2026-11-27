@@ -171,6 +171,34 @@ ladder = ["zero-shot", "prompt", "lora"]
 
 `--continue` checks the current graft against the genome as it is now, so editing the genome between attempts is safe.
 
+### Rebase on a Modal GPU
+
+A laptop can verify models, but training an 8B adapter needs a GPU. With [Modal](https://modal.com), the same rebase
+runs on one, and only for as long as it runs:
+
+```bash
+pip install 'graft-sh[modal]'
+modal token new                                  # once: a browser login, the token stays on your machine
+graft rebase --target qwen3 --runner modal       # an L4 by default; --gpu A100-80GB for bigger models
+```
+
+graft uploads the project (the genome, `graft.toml`, local files it names, and a rebase in progress), runs the same
+graft there with the trainer's packages, and streams the output here. What the run changed under `.graft` comes back,
+so `graft show`, `graft verify`, `graft export` and `graft rebase --continue` (on Modal again, or here) work as if
+it had run here. Adapters of rounds that were not kept stay on Modal: every run folder is saved whole on the volume
+`graft-runs`, and model weights are cached on `graft-hf-cache`, so each is downloaded once.
+
+Models in `graft.toml` must be reachable from Modal: weights by Hugging Face id or local folder (uploaded with the
+project), or a public endpoint. A model served on this machine's localhost is refused before anything is uploaded.
+graft sends no credentials. For a gated model, create a Modal secret holding `HF_TOKEN` and name it:
+
+```toml
+[modal]
+gpu = "L4"                 # default for --runner modal
+secrets = ["huggingface"]  # Modal secrets to attach
+timeout_hours = 6
+```
+
 ## Training
 
 The `lora` rung needs a `[trainer]` table. The built-in trainer fits a LoRA adapter with Transformers and PEFT:

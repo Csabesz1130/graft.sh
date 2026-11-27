@@ -126,6 +126,8 @@ Carries the genome onto a new base model. It checks the genome against the sourc
 | `--rounds <n>` | Attempts per rung. Default: `[rebase] rounds`, else 3 |
 | `--continue` | Pick up the rebase in progress |
 | `--abort` | Drop the rebase in progress. Nothing it trained or recorded is deleted |
+| `--runner modal` | Run the rebase on a Modal GPU and bring its results back into `.graft` here; see [the user guide](user-guide.md#rebase-on-a-modal-gpu). Needs `graft-sh[modal]` and a Modal account. `--abort` always runs here |
+| `--gpu <name>` | With `--runner modal`: `L4` (default, or `[modal] gpu`), `A10G`, `L40S`, `A100-80GB`, `H100`, ..., or `none` for a CPU container |
 | `--enforce-all` | Hold the new base to every case, also those the source fails. By default those are left out: a rebase carries over behavior the source has. Default: `[rebase] enforce_all`. Can be turned on with `--continue`, which checks the source again |
 
 One rebase can be in progress at a time. It ends in one of three ways:

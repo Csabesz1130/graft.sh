@@ -110,6 +110,14 @@ def _parser() -> argparse.ArgumentParser:
     rb.add_argument("--rounds", type=int, help="attempts per rung. default 3")
     rb.add_argument("--continue", dest="resume", action="store_true", help="pick up the rebase in progress")
     rb.add_argument("--abort", action="store_true", help="drop the rebase in progress")
+    rb.add_argument("--runner", choices=["local", "modal"], default="local",
+                    help="modal: run the rebase on a Modal GPU and bring the results back here "
+                         "(needs graft-sh[modal] and `modal token new`). default: here")
+    rb.add_argument("--fetch", nargs="?", const="", metavar="RUN_ID",
+                    help="bring back the result of a --runner modal rebase that finished while this terminal was "
+                         "closed. default: the one last started here")
+    rb.add_argument("--gpu", help="with --runner modal: L4 (default, or [modal] gpu), A10G, L40S, A100-80GB, "
+                                  "H100, or none for CPU")
     rb.add_argument("--enforce-all", action="store_true",
                     help="hold the new base to every case, also those the source fails (new behavior, not carried "
                          "over). default: [rebase] enforce_all, else only what the source already does")
@@ -448,7 +456,18 @@ def _rebase(args: argparse.Namespace) -> int:
         print(f"dropped the rebase onto {state['target']}; nothing it trained was deleted "
               f"({rebase.run_dir_of(project, state).relative_to(project.root)})")
         return 0
+    if args.fetch is not None:
+        from graft import remote
+        try:
+            return remote.fetch(project, args.fetch or None)
+        except remote.RemoteError as err:
+            raise rebase.RebaseError(str(err)) from None
     found = _load(project)
+    if args.runner == "modal":
+        return _rebase_on_modal(args, project)
+    if args.gpu:
+        print("--gpu only applies with --runner modal", file=sys.stderr)
+        return 2
     if args.resume:
         run = rebase.Rebase.resume(project, found, tick=_tick)
         if args.ladder:
@@ -470,6 +489,35 @@ def _rebase(args: argparse.Namespace) -> int:
                                   project.ladder(args.ladder.split(",") if args.ladder else None), options,
                                   tick=_tick)
     return run.run()
+
+
+def _rebase_on_modal(args: argparse.Namespace, project: config.Project) -> int:
+    from graft import remote
+    argv: list[str] = []
+    if args.resume:
+        current = rebase.in_progress(project)
+        if not current:
+            raise rebase.RebaseError("no rebase is in progress to continue")
+        argv.append("--continue")
+        models = [current["target"], *([current["source"]] if current.get("source") else [])]
+    else:
+        if not args.target:
+            print("graft rebase needs --target <model> (or --continue, or --abort)", file=sys.stderr)
+            return 2
+        if rebase.in_progress(project):
+            raise rebase.RebaseError("a rebase is already in progress: `graft rebase --continue` or `--abort`")
+        source = args.source or project.rebase.get("source")
+        argv += ["--target", args.target] + (["--source", args.source] if args.source else [])
+        models = [args.target, *([source] if source else [])]
+    for flag, value in (("--ladder", args.ladder), ("--rounds", args.rounds)):
+        if value:
+            argv += [flag, str(value)]
+    if args.enforce_all:
+        argv.append("--enforce-all")
+    try:
+        return remote.run(project, argv, args.gpu, models)
+    except remote.RemoteError as err:
+        raise rebase.RebaseError(str(err)) from None
 
 
 def _log(args: argparse.Namespace) -> int:

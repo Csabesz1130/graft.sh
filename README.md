@@ -110,6 +110,7 @@ graft status                        # rules, cases, and any rebase in progress
 graft check                         # does the model that has the behavior pass its own genome?
 graft verify <model>                # run every gate against a model; exit 1 when one fails
 graft rebase --target <model>       # carry the genome onto a new base
+graft rebase --target <model> --runner modal   # the same, on a Modal GPU, results back here
 graft show                          # the latest certificate
 graft export --format gguf ...      # one llama.cpp file with the adapter merged in (Mac, CPU, LM Studio, Ollama)
 graft verify <model> --against <run or bundle>   # does this deployment still behave as certified?
