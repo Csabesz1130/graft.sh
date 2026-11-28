@@ -192,9 +192,9 @@ The run is detached from your terminal. Press Ctrl-C, close the laptop or lose t
 graft prints how to get it back and how to stop it:
 
 ```
-stopped watching. The rebase is still running on Modal, and its GPU is billed until it ends.
-  bring it back when it is done:  graft rebase --fetch <run>
-  stop it now:                    graft rebase --cancel   (or: modal app stop <app>)
+Still running on Modal, detached; its GPU is billed until it ends or is stopped.
+  fetch later:  graft rebase --fetch <run>
+  stop now:     graft rebase --cancel  (or: modal app stop <app>)
 ```
 
 `graft rebase --fetch` with no run brings back the one last started from this project. It writes only under

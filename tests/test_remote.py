@@ -262,9 +262,10 @@ class Fetch(unittest.TestCase):
     def test_the_detach_message_says_what_runs_and_how_to_stop_it(self):
         lines = remote.detached_message({"id": "proj-1", "app": "ap-123"}).splitlines()
         self.assertEqual(len(lines), 3)
-        self.assertIn("still running", lines[0])
+        self.assertIn("Still running", lines[0])
         self.assertIn("billed", lines[0])
         self.assertIn("graft rebase --fetch proj-1", lines[1])
+        self.assertTrue(all(len(line) <= 92 for line in lines), "fits a terminal without wrapping")
         self.assertIn("graft rebase --cancel", lines[2])
         self.assertIn("modal app stop ap-123", lines[2])
 

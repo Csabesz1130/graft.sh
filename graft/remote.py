@@ -245,24 +245,46 @@ def run(project: Project, argv: list[str], gpu: str | None, models: list[str], g
               "started": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     _write_pending(project, record)
     # detached: the run goes on if this terminal closes or the laptop sleeps; --fetch brings it back later
-    with modal.enable_output(), app.run(detach=True):
+    output, session = modal.enable_output(), app.run(detach=True)
+    output.__enter__()
+    try:
+        session.__enter__()
+    except BaseException:
+        output.__exit__(*sys.exc_info())
+        raise
+    try:
         call = function.spawn(archive, sent, argv, keep_as, [opts["volume"], opts["cache"]])
         record.update(app=app.app_id, call=call.object_id)
         _write_pending(project, record)
+        result = call.get()
+    except KeyboardInterrupt:
+        # Modal's own closing lines ("App completed", a log timeout) would say the opposite of what is true
+        import logging
+        quiet = logging.getLogger("modal-client")
+        level = quiet.level
+        quiet.setLevel(logging.ERROR)
         try:
-            result = call.get()
-        except KeyboardInterrupt:
-            print("\n" + detached_message(record), file=sys.stderr)
-            return 130
+            output.__exit__(None, None, None)
+            session.__exit__(None, None, None)
+        finally:
+            quiet.setLevel(level)
+        print("\n" + detached_message(record), file=sys.stderr)
+        return 130
+    except BaseException:
+        session.__exit__(*sys.exc_info())
+        output.__exit__(None, None, None)
+        raise
+    session.__exit__(None, None, None)
+    output.__exit__(None, None, None)
     status = {k: result[k] for k in ("code", "deleted", "sha256", "files")}
     return _apply(project, result["changes"], status, record,
                   None if keep_remote else modal.Volume.from_name(opts["volume"]))
 
 
 def detached_message(record: dict[str, Any]) -> str:
-    return (f"stopped watching. The rebase is still running on Modal, and its GPU is billed until it ends.\n"
-            f"  bring it back when it is done:  graft rebase --fetch {record['id']}\n"
-            f"  stop it now:                    graft rebase --cancel   (or: modal app stop {record.get('app')})")
+    return (f"Still running on Modal, detached; its GPU is billed until it ends or is stopped.\n"
+            f"  fetch later:  graft rebase --fetch {record['id']}\n"
+            f"  stop now:     graft rebase --cancel  (or: modal app stop {record.get('app')})")
 
 
 def _write_pending(project: Project, record: dict[str, Any]) -> None:
