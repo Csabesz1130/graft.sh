@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.0
 
 - `graft rebase --runner modal [--gpu L4]`: runs the rebase on a Modal GPU from any machine with the Modal client,
   streams its output, and brings what it changed under `.graft` back, so `show`, `verify`, `export` and `--continue`
