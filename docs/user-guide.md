@@ -188,6 +188,20 @@ so `graft show`, `graft verify`, `graft export` and `graft rebase --continue` (o
 it had run here. Adapters of rounds that were not kept stay on Modal: every run folder is saved whole on the volume
 `graft-runs`, and model weights are cached on `graft-hf-cache`, so each is downloaded once.
 
+The run is detached from your terminal. Press Ctrl-C, close the laptop or lose the network, and it goes on;
+graft prints how to get it back and how to stop it:
+
+```
+stopped watching. The rebase is still running on Modal, and its GPU is billed until it ends.
+  bring it back when it is done:  graft rebase --fetch <run>
+  stop it now:                    graft rebase --cancel   (or: modal app stop <app>)
+```
+
+`graft rebase --fetch` with no run brings back the one last started from this project. It writes only under
+`.graft`, never over `graft.toml` or the genome, refuses if files under `.graft` changed here while the job ran, and
+checks every file against the sha256 the remote run recorded. Then the result bundle is removed from the volume
+(`--keep-remote` keeps it); run folders, with every round's adapter, stay on the volume.
+
 Models in `graft.toml` must be reachable from Modal: weights by Hugging Face id or local folder (uploaded with the
 project), or a public endpoint. A model served on this machine's localhost is refused before anything is uploaded.
 graft sends no credentials. For a gated model, create a Modal secret holding `HF_TOKEN` and name it:

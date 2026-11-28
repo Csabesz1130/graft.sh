@@ -116,6 +116,11 @@ def _parser() -> argparse.ArgumentParser:
     rb.add_argument("--fetch", nargs="?", const="", metavar="RUN_ID",
                     help="bring back the result of a --runner modal rebase that finished while this terminal was "
                          "closed. default: the one last started here")
+    rb.add_argument("--cancel", action="store_true",
+                    help="stop the --runner modal rebase started here, so its GPU is no longer billed")
+    rb.add_argument("--keep-remote", action="store_true",
+                    help="with --runner modal or --fetch: leave the result bundle on the Modal volume after it "
+                         "came back (it is removed once the files here match their checksums)")
     rb.add_argument("--gpu", help="with --runner modal: L4 (default, or [modal] gpu), A10G, L40S, A100-80GB, "
                                   "H100, or none for CPU")
     rb.add_argument("--enforce-all", action="store_true",
@@ -456,15 +461,21 @@ def _rebase(args: argparse.Namespace) -> int:
         print(f"dropped the rebase onto {state['target']}; nothing it trained was deleted "
               f"({rebase.run_dir_of(project, state).relative_to(project.root)})")
         return 0
-    if args.fetch is not None:
+    if args.fetch is not None or args.cancel:
         from graft import remote
         try:
-            return remote.fetch(project, args.fetch or None)
+            if args.cancel:
+                return remote.cancel(project)
+            try:
+                genome_id = _load(project).id
+            except genome.GenomeError:
+                genome_id = None
+            return remote.fetch(project, args.fetch or None, genome_id, args.keep_remote)
         except remote.RemoteError as err:
             raise rebase.RebaseError(str(err)) from None
     found = _load(project)
     if args.runner == "modal":
-        return _rebase_on_modal(args, project)
+        return _rebase_on_modal(args, project, found.id)
     if args.gpu:
         print("--gpu only applies with --runner modal", file=sys.stderr)
         return 2
@@ -491,7 +502,7 @@ def _rebase(args: argparse.Namespace) -> int:
     return run.run()
 
 
-def _rebase_on_modal(args: argparse.Namespace, project: config.Project) -> int:
+def _rebase_on_modal(args: argparse.Namespace, project: config.Project, genome_id: str) -> int:
     from graft import remote
     argv: list[str] = []
     if args.resume:
@@ -515,7 +526,7 @@ def _rebase_on_modal(args: argparse.Namespace, project: config.Project) -> int:
     if args.enforce_all:
         argv.append("--enforce-all")
     try:
-        return remote.run(project, argv, args.gpu, models)
+        return remote.run(project, argv, args.gpu, models, genome_id, args.keep_remote)
     except remote.RemoteError as err:
         raise rebase.RebaseError(str(err)) from None
 

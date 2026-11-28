@@ -6,6 +6,10 @@
   streams its output, and brings what it changed under `.graft` back, so `show`, `verify`, `export` and `--continue`
   work locally. Every run folder is kept whole on the Modal volume `graft-runs`. `[modal]` sets the GPU, secrets,
   timeout and packages. Needs `graft-sh[modal]`.
+- The remote rebase is detached: Ctrl-C or a closed laptop does not stop it, and graft prints the
+  `graft rebase --fetch <run>` and `graft rebase --cancel` (or `modal app stop <app>`) commands. `--fetch` with no
+  run brings back the one started here, writes only under `.graft`, refuses files changed here while the job ran,
+  checks sha256 before and after writing, then removes the result bundle from the volume (`--keep-remote` keeps it).
 
 ## 0.2.0
 

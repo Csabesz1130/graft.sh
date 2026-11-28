@@ -107,57 +107,171 @@ class Packing(unittest.TestCase):
                 remote.settings(config.Project(self.root, {"modal": bad}), None)
 
 
-class Fetch(unittest.TestCase):
-    """--fetch with a stand-in for Modal's volume API: the result of a run nobody watched comes back."""
+def result(files: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for name, data in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
 
-    setUp = Packing.setUp
 
-    def fake_modal(self, files: dict[str, bytes]):
+class FakeModal:
+    """Stands in for the parts of the Modal client --fetch and --cancel use."""
+
+    def __init__(self, files: dict[str, bytes]):
+        self.files, self.removed, self.cancelled = dict(files), [], []
+        fake = self
+
         class Volume:
             @staticmethod
             def from_name(name):
-                self.assertEqual(name, "graft-runs")
+                assert name == "graft-runs", name
                 return Volume()
 
             def read_file(self, path):
-                if path not in files:
+                if path not in fake.files:
                     raise FileNotFoundError(path)
-                yield files[path]
-        return type(sys)("modal"), Volume
+                yield fake.files[path]
 
-    def run_fetch(self, files, wanted=None):
-        module, volume = self.fake_modal(files)
-        module.Volume = volume
-        saved = sys.modules.get("modal")
-        sys.modules["modal"] = module
-        try:
-            return remote.fetch(self.project, wanted)
-        finally:
-            if saved is None:
-                sys.modules.pop("modal", None)
-            else:
-                sys.modules["modal"] = saved
+            def remove_file(self, path, recursive=False):
+                fake.removed.append(path)
+                fake.files.pop(path, None)
 
-    def test_fetch_the_run_started_here(self):
-        with self.assertRaises(remote.RemoteError):
-            self.run_fetch({})                       # nothing started here, nothing named
-        write(self.root / ".graft" / remote.PENDING, json.dumps({"id": "proj-1", "volume": "graft-runs"}))
-        with self.assertRaises(remote.RemoteError) as caught:
-            self.run_fetch({})                       # not finished yet
+        class FunctionCall:
+            @staticmethod
+            def from_id(call_id):
+                class Call:
+                    def cancel(self, terminate_containers=False):
+                        fake.cancelled.append((call_id, terminate_containers))
+                return Call()
+
+        self.module = type(sys)("modal")
+        self.module.Volume, self.module.FunctionCall = Volume, FunctionCall
+
+    def __enter__(self):
+        self.saved = sys.modules.get("modal")
+        sys.modules["modal"] = self.module
+        return self
+
+    def __exit__(self, *exc):
+        if self.saved is None:
+            sys.modules.pop("modal", None)
+        else:
+            sys.modules["modal"] = self.saved
+
+
+class Fetch(unittest.TestCase):
+    """--fetch and --cancel against a stand-in for Modal: what comes back, what is refused, what is cleaned up."""
+
+    setUp = Packing.setUp
+
+    def start(self, **extra):
+        """As run() leaves it: the pending record, with what was uploaded."""
+        _, sent = remote.pack(self.project)
+        record = {"id": "proj-1", "volume": "graft-runs", "app": "ap-123", "call": "fc-456", "genome": "g1",
+                  "sent": sent, **extra}
+        write(self.root / ".graft" / remote.PENDING, json.dumps(record))
+        return record
+
+    def bundle(self, files: dict[str, bytes], code: int = 0, deleted=(), **status) -> dict[str, bytes]:
+        changes = result(files)
+        body = {"code": code, "deleted": list(deleted), "sha256": __import__("hashlib").sha256(changes).hexdigest(),
+                "files": remote.manifest(changes), **status}
+        return {"proj-1/result.json": json.dumps(body).encode(), "proj-1/result.tar.gz": changes}
+
+    NEW = ".graft/grafts/t/0009-dddd/state.json"
+
+    def test_plain_fetch_uses_the_run_started_here_and_cleans_up(self):
+        with FakeModal({}), self.assertRaises(remote.RemoteError):
+            remote.fetch(self.project, None)                  # nothing started here, nothing named
+        self.start()
+        with FakeModal({}) as fake, self.assertRaises(remote.RemoteError) as caught:
+            remote.fetch(self.project, None)                  # not finished yet
         self.assertIn("still running", str(caught.exception))
-        buffer = io.BytesIO()
-        with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-            data = b'{"target": "t", "run": "0009-dddd", "status": "passed"}'
-            info = tarfile.TarInfo(".graft/grafts/t/0009-dddd/state.json")
-            info.size = len(data)
-            tar.addfile(info, io.BytesIO(data))
-        code = self.run_fetch({"proj-1/result.json": b'{"code": 0, "deleted": []}',
-                               "proj-1/result.tar.gz": buffer.getvalue()})
-        self.assertEqual(code, 0)
-        self.assertTrue((self.root / ".graft/grafts/t/0009-dddd/state.json").is_file())
-        self.assertFalse((self.root / ".graft" / remote.PENDING).exists(), "fetched: nothing pending any more")
-        with self.assertRaises(remote.RemoteError):
-            self.run_fetch({}, "../elsewhere")
+        self.assertIn("ap-123", str(caught.exception))
+        with FakeModal(self.bundle({self.NEW: b'{"status": "passed"}'})) as fake:
+            self.assertEqual(remote.fetch(self.project, None, "g1"), 0)
+        self.assertTrue((self.root / self.NEW).is_file())
+        self.assertFalse((self.root / ".graft" / remote.PENDING).exists(), "nothing pending any more")
+        self.assertEqual(sorted(fake.removed), ["proj-1/result.json", "proj-1/result.tar.gz"],
+                         "the bundle leaves the volume once the files here match")
+
+    def test_keep_remote(self):
+        self.start()
+        with FakeModal(self.bundle({self.NEW: b"{}"})) as fake:
+            remote.fetch(self.project, None, keep_remote=True)
+        self.assertEqual(fake.removed, [])
+
+    def test_edits_made_here_while_it_ran_are_never_overwritten(self):
+        self.start()
+        (self.root / "graft.toml").write_text("# edited while the job ran\n")
+        (self.root / "genome" / "rules" / "r.toml").write_text('statement = "edited"\n')
+        # a result that tries to write outside .graft is refused whole, and nothing is cleaned up
+        with FakeModal(self.bundle({self.NEW: b"{}", "graft.toml": b"from modal"})) as fake:
+            with self.assertRaises(remote.RemoteError):
+                remote.fetch(self.project, None)
+        self.assertEqual((self.root / "graft.toml").read_text(), "# edited while the job ran\n")
+        self.assertFalse((self.root / self.NEW).exists(), "nothing was written")
+        self.assertEqual(fake.removed, [], "a refused result stays on Modal")
+        # a file under .graft changed here since the upload is not overwritten either
+        state = self.done / "state.json"
+        state.write_text(json.dumps({"target": "t", "run": "0001-aaaa", "status": "passed", "note": "mine"}))
+        with FakeModal(self.bundle({".graft/grafts/t/0001-aaaa/state.json": b"{}"})):
+            with self.assertRaises(remote.RemoteError) as caught:
+                remote.fetch(self.project, None)
+        self.assertIn("changed here", str(caught.exception))
+        self.assertIn('"mine"', state.read_text())
+        # the edited genome is untouched by a good fetch, and the user is told the run checked the old one
+        with FakeModal(self.bundle({self.NEW: b"{}"})):
+            out = io.StringIO()
+            with __import__("contextlib").redirect_stderr(out):
+                remote.fetch(self.project, None, "g2")
+        self.assertIn("genome changed", out.getvalue())
+        self.assertEqual((self.root / "genome" / "rules" / "r.toml").read_text(), 'statement = "edited"\n')
+
+    def test_a_bad_path_anywhere_means_nothing_is_written(self):
+        self.start()
+        with FakeModal(self.bundle({self.NEW: b"{}", "../evil": b"x"})) as fake:
+            with self.assertRaises(remote.RemoteError):
+                remote.fetch(self.project, None)
+        self.assertFalse((self.root / self.NEW).exists())
+        self.assertFalse((self.root.parent / "evil").exists())
+        self.assertEqual(fake.removed, [])
+
+    def test_a_damaged_result_is_refused(self):
+        self.start()
+        files = self.bundle({self.NEW: b"{}"})
+        files["proj-1/result.tar.gz"] = result({self.NEW: b"tampered"})
+        with FakeModal(files) as fake, self.assertRaises(remote.RemoteError) as caught:
+            remote.fetch(self.project, None)
+        self.assertIn("checksum", str(caught.exception))
+        self.assertFalse((self.root / self.NEW).exists())
+        self.assertEqual(fake.removed, [])
+
+    def test_cancel(self):
+        with FakeModal({}), self.assertRaises(remote.RemoteError):
+            remote.cancel(self.project)                       # nothing running
+        self.start()
+        with FakeModal({}) as fake:
+            self.assertEqual(remote.cancel(self.project), 0)
+        self.assertEqual(fake.cancelled, [("fc-456", True)], "the containers stop, so the GPU stops")
+        self.assertFalse((self.root / ".graft" / remote.PENDING).exists())
+
+    def test_the_detach_message_says_what_runs_and_how_to_stop_it(self):
+        lines = remote.detached_message({"id": "proj-1", "app": "ap-123"}).splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertIn("still running", lines[0])
+        self.assertIn("billed", lines[0])
+        self.assertIn("graft rebase --fetch proj-1", lines[1])
+        self.assertIn("graft rebase --cancel", lines[2])
+        self.assertIn("modal app stop ap-123", lines[2])
+
+    def test_the_pending_record_never_goes_up(self):
+        self.start()
+        archive, sent = remote.pack(self.project)
+        self.assertNotIn(f".graft/{remote.PENDING}", sent)
 
 
 class Cli(ExampleCase):

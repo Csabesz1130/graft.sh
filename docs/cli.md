@@ -127,6 +127,9 @@ Carries the genome onto a new base model. It checks the genome against the sourc
 | `--continue` | Pick up the rebase in progress |
 | `--abort` | Drop the rebase in progress. Nothing it trained or recorded is deleted |
 | `--runner modal` | Run the rebase on a Modal GPU and bring its results back into `.graft` here; see [the user guide](user-guide.md#rebase-on-a-modal-gpu). Needs `graft-sh[modal]` and a Modal account. `--abort` always runs here |
+| `--fetch [run]` | Bring back a `--runner modal` rebase that finished while nobody watched. Without a run, the one last started here (recorded in `.graft/modal-run.json`). Only files under `.graft` are written: never `graft.toml` or the genome, and not files under `.graft` changed here while the job ran. The result is checked against its sha256 before and after it is written |
+| `--cancel` | Stop the `--runner modal` rebase started here, so its GPU is no longer billed |
+| `--keep-remote` | With `--runner modal` or `--fetch`: leave the result bundle on the Modal volume. By default it is removed once the files here match their checksums; run folders stay either way |
 | `--gpu <name>` | With `--runner modal`: `L4` (default, or `[modal] gpu`), `A10G`, `L40S`, `A100-80GB`, `H100`, ..., or `none` for a CPU container |
 | `--enforce-all` | Hold the new base to every case, also those the source fails. By default those are left out: a rebase carries over behavior the source has. Default: `[rebase] enforce_all`. Can be turned on with `--continue`, which checks the source again |
 
